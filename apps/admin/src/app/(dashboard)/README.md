@@ -1,0 +1,3 @@
+# Pages agent — import paths
+
+UI: `import { Button, Card, KpiCard, DataTable, Drawer, Dialog, ConfirmDialog, Input, Select, Toggle, Tabs, Badge, StatusBadge, Money, PageHeader, Skeleton, EmptyState, ErrorState } from '@/components/ui'` — lib: `api`, `useApiQuery`, `useApiMutation`, `ApiError` from `'@/lib/api'`; `useAuth` from `'@/lib/auth'`; `useSocketEvent`, `useSocket` from `'@/lib/socket'`; `formatIQD`, `formatDate`, `formatTime`, `formatDateTime`, `formatRelative`, `formatNumber` from `'@/lib/format'`. Layout already provides RequireAuth + sidebar; expected routes: `/overview /orders /batches /approvals /users /exceptions /finance /settings` (all `'use client'`; wrap `useSearchParams` usage in `<Suspense>`).
