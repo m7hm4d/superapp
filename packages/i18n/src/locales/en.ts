@@ -173,6 +173,7 @@ export const en: TranslationKeys = {
     rejectionReasonLabel: 'Rejection reason',
     checkStatus: 'Refresh status',
     suspendedBody: 'Contact support for details and reactivation.',
+    driverOnTheWay: 'Driver {name} is on the way',
   },
   driver: {
     online: 'Online',

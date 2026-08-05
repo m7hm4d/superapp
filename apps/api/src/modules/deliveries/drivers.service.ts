@@ -23,6 +23,7 @@ import {
   driverProfiles,
   exceptions,
   orders,
+  users,
   vendorProfiles,
 } from '../../db/schema';
 import type {
@@ -40,6 +41,18 @@ export interface DriverBatchStop extends BatchStopView {
 
 export interface DriverBatchView extends BatchView {
   stops: DriverBatchStop[];
+}
+
+/** الدفعة الحية كما يراها المخبز: رمز الاستلام + السائق + أكواد الطلبات */
+export interface VendorActiveBatchView {
+  id: string;
+  status: string;
+  pickupPin: string;
+  ordersCount: number;
+  orderCodes: string[];
+  totalCashIqd: number;
+  driverName: string;
+  claimedAt: string | null;
 }
 
 export interface ReportExceptionInput {
@@ -155,6 +168,75 @@ export class DriversService {
     return this.loadBatchView(batch.id);
   }
 
+  /**
+   * دفعات المخبز الحية (CLAIMED/PICKUP_CONFIRMED/ACTIVE): ليعرض المخبز
+   * رمز الاستلام واسم السائق القادم وأكواد طلبات الدفعة.
+   */
+  async listActiveBatchesForVendor(vendorUserId: string): Promise<VendorActiveBatchView[]> {
+    const [vendor] = await this.db
+      .select({ id: vendorProfiles.id })
+      .from(vendorProfiles)
+      .where(eq(vendorProfiles.userId, vendorUserId))
+      .limit(1);
+    if (!vendor) {
+      throw new NotFoundException({ code: 'NO_PROFILE' });
+    }
+
+    // الحالات الحية كلها بعد المطالبة تحمل driver_id — inner join آمن
+    const rows = await this.db
+      .select({
+        id: batches.id,
+        status: batches.status,
+        pickupPin: batches.pickupPin,
+        totalCashIqd: batches.totalCashIqd,
+        claimedAt: batches.claimedAt,
+        driverName: users.fullName,
+      })
+      .from(batches)
+      .innerJoin(driverProfiles, eq(driverProfiles.id, batches.driverId))
+      .innerJoin(users, eq(users.id, driverProfiles.userId))
+      .where(
+        and(
+          eq(batches.vendorId, vendor.id),
+          inArray(batches.status, [...BATCH_ACTIVE_STATUSES]),
+        ),
+      )
+      .orderBy(asc(batches.claimedAt));
+    if (rows.length === 0) return [];
+
+    const codes = await this.db
+      .select({ batchId: batchOrders.batchId, code: orders.code })
+      .from(batchOrders)
+      .innerJoin(orders, eq(orders.id, batchOrders.orderId))
+      .where(
+        inArray(
+          batchOrders.batchId,
+          rows.map((r) => r.id),
+        ),
+      )
+      .orderBy(asc(batchOrders.sequence));
+    const codesByBatch = new Map<string, string[]>();
+    for (const c of codes) {
+      const list = codesByBatch.get(c.batchId);
+      if (list) list.push(c.code);
+      else codesByBatch.set(c.batchId, [c.code]);
+    }
+
+    return rows.map((r) => {
+      const orderCodes = codesByBatch.get(r.id) ?? [];
+      return {
+        id: r.id,
+        status: r.status,
+        pickupPin: r.pickupPin,
+        ordersCount: orderCodes.length,
+        orderCodes,
+        totalCashIqd: r.totalCashIqd,
+        driverName: r.driverName,
+        claimedAt: r.claimedAt ? r.claimedAt.toISOString() : null,
+      };
+    });
+  }
+
   // ─────────────────────────────── المطالبة الذرية ───────────────────────────────
 
   /**
@@ -178,9 +260,9 @@ export class DriversService {
           WHERE b2.driver_id = ${driver.id}
             AND b2.status IN ('CLAIMED', 'PICKUP_CONFIRMED', 'ACTIVE')
         )
-      RETURNING id, city_id
+      RETURNING id, city_id, vendor_id
     `);
-    const rows = result.rows as { id: string; city_id: string }[];
+    const rows = result.rows as { id: string; city_id: string; vendor_id: string }[];
     const claimed = rows[0];
     if (!claimed) {
       const [batch] = await this.db
@@ -205,6 +287,7 @@ export class DriversService {
       cityId: claimed.city_id,
       status: BatchStatus.CLAIMED,
       driverUserId: userId,
+      vendorProfileId: claimed.vendor_id,
     };
     this.emitter.emit('batch.status', event);
     return this.loadBatchView(batchId);
@@ -220,7 +303,7 @@ export class DriversService {
   async confirmPickup(userId: string, batchId: string, pin: string): Promise<DriverBatchView> {
     const driver = await this.requireDriverProfile(userId);
 
-    const { cityId, orderEvents } = await this.db.transaction(async (tx) => {
+    const { cityId, vendorId, orderEvents } = await this.db.transaction(async (tx) => {
       await tx.execute(sql`SELECT id FROM batches WHERE id = ${batchId} FOR UPDATE`);
       const [batch] = await tx.select().from(batches).where(eq(batches.id, batchId)).limit(1);
       if (!batch) {
@@ -261,7 +344,7 @@ export class DriversService {
         );
         events.push(event);
       }
-      return { cityId: batch.cityId, orderEvents: events };
+      return { cityId: batch.cityId, vendorId: batch.vendorId, orderEvents: events };
     });
 
     for (const e of orderEvents) this.emitter.emit('order.status', e);
@@ -270,6 +353,7 @@ export class DriversService {
       cityId,
       status: BatchStatus.ACTIVE,
       driverUserId: userId,
+      vendorProfileId: vendorId,
     };
     this.emitter.emit('batch.status', batchEvent);
     return this.loadBatchView(batchId);
@@ -388,13 +472,14 @@ export class DriversService {
       .update(batches)
       .set({ status: BatchStatus.COMPLETED, completedAt: new Date() })
       .where(and(eq(batches.id, batchId), eq(batches.status, BatchStatus.ACTIVE)))
-      .returning({ id: batches.id, cityId: batches.cityId });
+      .returning({ id: batches.id, cityId: batches.cityId, vendorId: batches.vendorId });
     if (!completed) return;
 
     const event: BatchStatusDomainEvent = {
       batchId: completed.id,
       cityId: completed.cityId,
       status: BatchStatus.COMPLETED,
+      vendorProfileId: completed.vendorId,
       ...(driverUserId !== undefined ? { driverUserId } : {}),
     };
     this.emitter.emit('batch.status', event);

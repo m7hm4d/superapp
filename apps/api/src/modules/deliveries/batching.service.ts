@@ -278,6 +278,7 @@ export class BatchingService implements OnModuleDestroy {
           batchId: b.id,
           cityId: b.cityId,
           status: BatchStatus.EXPIRED,
+          vendorProfileId: b.vendorId,
         };
         this.emitter.emit('batch.status', event);
       }

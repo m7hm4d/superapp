@@ -195,6 +195,7 @@ export class OpsService {
       batchId: result.batch.id,
       cityId: result.batch.cityId,
       status: BatchStatus.CANCELLED,
+      vendorProfileId: result.batch.vendorId,
       ...(result.driverUserId !== undefined ? { driverUserId: result.driverUserId } : {}),
     };
     this.emitter.emit('batch.status', event);

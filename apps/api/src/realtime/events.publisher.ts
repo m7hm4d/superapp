@@ -6,6 +6,7 @@ import {
   ConfigUpdatedEvent,
   NewOrderEvent,
   OrderStatusEvent,
+  SettlementUpdatedEvent,
   SocketRooms,
 } from '@superapp/shared';
 import { randomUUID } from 'node:crypto';
@@ -50,6 +51,16 @@ export interface BatchStatusDomainEvent {
   cityId: string;
   status: string;
   driverUserId?: string;
+  /** لغرفة البائع — ليرى رمز تسليم الدفعة فور قبول السائق */
+  vendorProfileId?: string;
+}
+
+export interface SettlementUpdatedDomainEvent {
+  settlementId: string;
+  status: string;
+  amountIqd: number;
+  vendorProfileId: string;
+  driverUserId: string;
 }
 
 @Injectable()
@@ -113,7 +124,23 @@ export class EventsPublisher {
     if (e.driverUserId) {
       this.gateway.server.to(SocketRooms.user(e.driverUserId)).emit('batch:status', payload);
     }
+    if (e.vendorProfileId) {
+      this.gateway.server.to(SocketRooms.vendor(e.vendorProfileId)).emit('batch:status', payload);
+    }
     this.gateway.server.to(SocketRooms.admin).emit('batch:status', payload);
+  }
+
+  @OnEvent('settlement.updated')
+  onSettlementUpdated(e: SettlementUpdatedDomainEvent) {
+    const payload: SettlementUpdatedEvent = {
+      ...this.base(),
+      settlementId: e.settlementId,
+      status: e.status,
+      amountIqd: e.amountIqd,
+    };
+    this.gateway.server.to(SocketRooms.vendor(e.vendorProfileId)).emit('settlement:updated', payload);
+    this.gateway.server.to(SocketRooms.user(e.driverUserId)).emit('settlement:updated', payload);
+    this.gateway.server.to(SocketRooms.admin).emit('settlement:updated', payload);
   }
 
   @OnEvent('config.updated')

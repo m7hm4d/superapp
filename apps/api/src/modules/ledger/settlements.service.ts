@@ -6,6 +6,7 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   Role,
   SETTLEMENT_TRANSITIONS,
@@ -18,6 +19,7 @@ import type { SQL } from 'drizzle-orm';
 import { generatePin } from '../../common/codes';
 import { DB, DbClient } from '../../db/drizzle.module';
 import { driverProfiles, settlements, users, vendorProfiles } from '../../db/schema';
+import type { SettlementUpdatedDomainEvent } from '../../realtime/events.publisher';
 import { LedgerService, parseOrderIds } from './ledger.service';
 import type { DbTx, DriverOwedByVendorRow, VendorOutstandingByDriverRow } from './ledger.service';
 
@@ -59,6 +61,7 @@ export class SettlementsService {
   constructor(
     @Inject(DB) private readonly db: DbClient,
     private readonly ledger: LedgerService,
+    private readonly emitter: EventEmitter2,
   ) {}
 
   // ─────────────────────────────── مسار السائق ───────────────────────────────
@@ -120,6 +123,16 @@ export class SettlementsService {
       return row;
     });
 
+    // البث بعد التزام المعاملة — الغرف تُحل في الناشر
+    const event: SettlementUpdatedDomainEvent = {
+      settlementId: created.id,
+      status: created.status,
+      amountIqd: created.amountIqd,
+      vendorProfileId: vendorId,
+      driverUserId,
+    };
+    this.emitter.emit('settlement.updated', event);
+
     // السائق يعرض الPIN للمخبز — يُعاد له حصراً
     return this.toView(created, vendor.storeNameAr, driver.fullName, { includePin: true });
   }
@@ -151,7 +164,7 @@ export class SettlementsService {
 
   async confirm(vendorUserId: string, settlementId: string, pin: string): Promise<SettlementView> {
     const vendor = await this.requireVendorProfile(vendorUserId);
-    await this.db.transaction(async (tx) => {
+    const settled = await this.db.transaction(async (tx) => {
       const row = await this.lockSettlement(tx, settlementId);
       if (row.vendorId !== vendor.id) {
         throw new ForbiddenException({ code: 'FORBIDDEN' });
@@ -177,7 +190,9 @@ export class SettlementsService {
         driverId: row.driverId,
         amountIqd: row.amountIqd,
       });
+      return row;
     });
+    await this.emitSettlementUpdated(settled, SettlementStatus.SETTLED);
     return this.loadView(settlementId, { includePin: false });
   }
 
@@ -187,7 +202,7 @@ export class SettlementsService {
     reason: string,
   ): Promise<SettlementView> {
     const vendor = await this.requireVendorProfile(vendorUserId);
-    await this.db.transaction(async (tx) => {
+    const disputed = await this.db.transaction(async (tx) => {
       const row = await this.lockSettlement(tx, settlementId);
       if (row.vendorId !== vendor.id) {
         throw new ForbiddenException({ code: 'FORBIDDEN' });
@@ -204,7 +219,9 @@ export class SettlementsService {
         .update(settlements)
         .set({ status: SettlementStatus.DISPUTED, disputeReason: reason })
         .where(eq(settlements.id, settlementId));
+      return row;
     });
+    await this.emitSettlementUpdated(disputed, SettlementStatus.DISPUTED);
     return this.loadView(settlementId, { includePin: false });
   }
 
@@ -239,7 +256,7 @@ export class SettlementsService {
     adminUserId: string,
     reason: string,
   ): Promise<SettlementView> {
-    await this.db.transaction(async (tx) => {
+    const resolved = await this.db.transaction(async (tx) => {
       const row = await this.lockSettlement(tx, settlementId);
       const from = row.status as SettlementStatus;
       if (!canTransition(SETTLEMENT_TRANSITIONS, from, SettlementStatus.SETTLED, Role.ADMIN)) {
@@ -266,11 +283,34 @@ export class SettlementsService {
         driverId: row.driverId,
         amountIqd: row.amountIqd,
       });
+      return row;
     });
+    await this.emitSettlementUpdated(resolved, SettlementStatus.SETTLED);
     return this.loadView(settlementId, { includePin: false });
   }
 
   // ─────────────────────────────── مساعدات داخلية ───────────────────────────────
+
+  /**
+   * يبث settlement.updated بعد التزام المعاملة. الصف الممرر لقطة ما قبل
+   * التحديث، لذا تُمرر الحالة الهدف صراحةً. driverUserId يُحل من ملف السائق.
+   */
+  private async emitSettlementUpdated(row: SettlementRow, status: SettlementStatus): Promise<void> {
+    const [driver] = await this.db
+      .select({ userId: driverProfiles.userId })
+      .from(driverProfiles)
+      .where(eq(driverProfiles.id, row.driverId))
+      .limit(1);
+    if (!driver) return; // FK يضمن الوجود عملياً؛ حماية فقط — البث تلميح لا حقيقة
+    const event: SettlementUpdatedDomainEvent = {
+      settlementId: row.id,
+      status,
+      amountIqd: row.amountIqd,
+      vendorProfileId: row.vendorId,
+      driverUserId: driver.userId,
+    };
+    this.emitter.emit('settlement.updated', event);
+  }
 
   private async lockSettlement(tx: DbTx, settlementId: string): Promise<SettlementRow> {
     await tx.execute(sql`SELECT id FROM settlements WHERE id = ${settlementId} FOR UPDATE`);

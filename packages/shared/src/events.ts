@@ -44,11 +44,18 @@ export interface ConfigUpdatedEvent extends BaseEvent {
   keys: string[];
 }
 
+export interface SettlementUpdatedEvent extends BaseEvent {
+  settlementId: string;
+  status: string;
+  amountIqd: number;
+}
+
 export interface ServerToClientEvents {
   'order:new': (e: NewOrderEvent) => void;
   'order:status': (e: OrderStatusEvent) => void;
   'batch:offered': (e: BatchOfferedEvent) => void;
   'batch:status': (e: BatchStatusEvent) => void;
+  'settlement:updated': (e: SettlementUpdatedEvent) => void;
   'config:updated': (e: ConfigUpdatedEvent) => void;
 }
 

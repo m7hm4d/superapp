@@ -6,6 +6,7 @@ import { DriverBatchesController } from './driver-batches.controller';
 import { DriverDeliveriesController } from './driver-deliveries.controller';
 import { DriverProfileController } from './driver-profile.controller';
 import { DriversService } from './drivers.service';
+import { VendorBatchesController } from './vendor-batches.controller';
 
 /**
  * آلة 2 — محرك الدفعات: الخادم يقترح دفعات من 1–3 طلبات READY
@@ -14,7 +15,12 @@ import { DriversService } from './drivers.service';
  */
 @Module({
   imports: [OrdersModule, LedgerModule],
-  controllers: [DriverProfileController, DriverBatchesController, DriverDeliveriesController],
+  controllers: [
+    DriverProfileController,
+    DriverBatchesController,
+    DriverDeliveriesController,
+    VendorBatchesController,
+  ],
   providers: [BatchingService, DriversService],
 })
 export class DeliveriesModule {}

@@ -8,7 +8,12 @@ import React, {
 } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { createSocket } from '@superapp/api-client';
-import type { NewOrderEvent, OrderStatusEvent } from '@superapp/shared';
+import type {
+  BatchStatusEvent,
+  NewOrderEvent,
+  OrderStatusEvent,
+  SettlementUpdatedEvent,
+} from '@superapp/shared';
 import { API_BASE_URL, api, storage } from './api';
 import { useAuthStore } from '../stores/auth';
 import { useAlertStore } from '../stores/alert';
@@ -70,6 +75,14 @@ export function SocketProvider({ children }: { children: ReactNode }) {
         if (cancelled) return;
         void queryClient.invalidateQueries({ queryKey: ['vendor-orders'] });
         void queryClient.invalidateQueries({ queryKey: ['vendor-order'] });
+        void queryClient.invalidateQueries({ queryKey: ['vendor-ledger'] });
+      });
+      socket.on('batch:status', (_e: BatchStatusEvent) => {
+        if (cancelled) return;
+        void queryClient.invalidateQueries({ queryKey: ['vendor-batches'] });
+      });
+      socket.on('settlement:updated', (_e: SettlementUpdatedEvent) => {
+        if (cancelled) return;
         void queryClient.invalidateQueries({ queryKey: ['vendor-ledger'] });
       });
       socket.on('config:updated', () => {

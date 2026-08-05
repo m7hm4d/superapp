@@ -20,6 +20,18 @@ import { asArray } from '../../src/lib/types';
 
 type QueueTab = 'new' | 'preparing' | 'ready';
 
+/** دفعة حية كما يرجعها GET vendor/batches/active */
+interface VendorActiveBatch {
+  id: string;
+  status: string;
+  pickupPin: string;
+  ordersCount: number;
+  orderCodes: string[];
+  totalCashIqd: number;
+  driverName: string;
+  claimedAt: string | null;
+}
+
 const TAB_LABEL_KEY = {
   new: 'queueNew',
   preparing: 'queuePreparing',
@@ -68,6 +80,26 @@ function OrderCard({ order, now, onPress }: { order: OrderView; now: number; onP
   );
 }
 
+/** بطاقة دفعة حية: السائق القادم + رمز تسليم الدفعة كبيراً + أكواد الطلبات */
+function ActiveBatchCard({ batch }: { batch: VendorActiveBatch }) {
+  return (
+    <Card className="gap-2">
+      <AppText variant="heading">
+        {t('vendor', 'driverOnTheWay', { name: batch.driverName })}
+      </AppText>
+      <View className="flex-row items-center justify-between">
+        <AppText variant="caption">{t('vendor', 'pickupPin')}</AppText>
+        <AppText variant="money" className="text-3xl" selectable>
+          {batch.pickupPin}
+        </AppText>
+      </View>
+      <AppText variant="caption" selectable>
+        {batch.orderCodes.join('  ·  ')}
+      </AppText>
+    </Card>
+  );
+}
+
 /** M-02 طابور الطلبات: تبويبات جديد/تحضير/جاهز مع polling احتياطي كل 10 ثوانٍ */
 export default function OrdersQueueScreen() {
   const router = useRouter();
@@ -82,6 +114,17 @@ export default function OrdersQueueScreen() {
     },
     refetchInterval: 10_000,
   });
+
+  // الدفعات الحية (رمز التسليم للسائق) — تُعرض فوق قائمة «جاهز» فقط
+  const batchesQuery = useQuery({
+    queryKey: ['vendor-batches'],
+    queryFn: async () => {
+      const data = await api.get<unknown>('vendor/batches/active');
+      return asArray<VendorActiveBatch>(data, 'batches');
+    },
+    refetchInterval: 15_000,
+  });
+  const activeBatches = tab === 'ready' ? (batchesQuery.data ?? []) : [];
 
   return (
     <Screen>
@@ -98,6 +141,14 @@ export default function OrdersQueueScreen() {
           ))}
         </View>
       </View>
+
+      {activeBatches.length > 0 ? (
+        <View className="px-4 pb-2 gap-3">
+          {activeBatches.map((b) => (
+            <ActiveBatchCard key={b.id} batch={b} />
+          ))}
+        </View>
+      ) : null}
 
       {query.isPending ? (
         <LoadingState />

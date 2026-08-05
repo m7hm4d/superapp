@@ -171,6 +171,7 @@ export const ar = {
     rejectionReasonLabel: 'سبب الرفض',
     checkStatus: 'تحديث الحالة',
     suspendedBody: 'تواصل مع الدعم لمعرفة التفاصيل وإعادة التفعيل.',
+    driverOnTheWay: 'السائق {name} في الطريق إليك',
   },
   driver: {
     online: 'متصل',
