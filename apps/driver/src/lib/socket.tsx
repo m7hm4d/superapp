@@ -2,7 +2,7 @@ import { createSocket } from '@superapp/api-client';
 import { useQueryClient } from '@tanstack/react-query';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { useAuthStore } from '../stores/auth';
-import { API_URL, storage } from './api';
+import { API_URL, client, storage } from './api';
 
 type AppSocket = ReturnType<typeof createSocket>;
 
@@ -37,7 +37,11 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     void (async () => {
       const token = await storage.getAccess();
       if (disposed || !token) return;
-      socket = createSocket({ baseUrl: API_URL, token });
+      // getToken يُقيَّم عند كل محاولة اتصال — يجدد التوكن فلا يموت البث بعد 15 دقيقة
+      socket = createSocket({
+        baseUrl: API_URL,
+        getToken: () => client.getFreshAccessToken(),
+      });
 
       socket.on('connect', () => setValue({ socket, connected: true }));
       socket.on('disconnect', () => setValue({ socket, connected: false }));

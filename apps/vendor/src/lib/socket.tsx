@@ -9,7 +9,7 @@ import React, {
 import { useQueryClient } from '@tanstack/react-query';
 import { createSocket } from '@superapp/api-client';
 import type { NewOrderEvent, OrderStatusEvent } from '@superapp/shared';
-import { API_BASE_URL, storage } from './api';
+import { API_BASE_URL, api, storage } from './api';
 import { useAuthStore } from '../stores/auth';
 import { useAlertStore } from '../stores/alert';
 
@@ -43,7 +43,11 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       const token = await storage.getAccess();
       if (cancelled || !token) return;
 
-      const socket = createSocket({ baseUrl: API_BASE_URL, token });
+      // getToken يُقيَّم عند كل محاولة اتصال — يجدد التوكن فلا يموت البث بعد 15 دقيقة
+      const socket = createSocket({
+        baseUrl: API_BASE_URL,
+        getToken: () => api.getFreshAccessToken(),
+      });
       socketRef.current = socket;
 
       socket.on('connect', () => {

@@ -40,7 +40,11 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
 
     void api.storage.getAccess().then((token) => {
       if (disposed || !token) return;
-      instance = createSocket({ baseUrl: BASE_URL, token });
+      // getToken يُقيَّم عند كل محاولة اتصال — يجدد التوكن فلا يموت البث بعد 15 دقيقة
+      instance = createSocket({
+        baseUrl: BASE_URL,
+        getToken: () => api.getFreshAccessToken(),
+      });
 
       instance.on('connect', () => {
         setConnected(true);

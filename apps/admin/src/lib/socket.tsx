@@ -11,7 +11,7 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import { createSocket, type Socket } from '@superapp/api-client';
 import type { ServerToClientEvents } from '@superapp/shared';
-import { API_BASE_URL } from './api';
+import { API_BASE_URL, api } from './api';
 import { useAuth } from './auth';
 import { getAccessTokenSync } from './storage';
 
@@ -35,7 +35,11 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     const token = getAccessTokenSync();
     if (!token) return;
 
-    const s = createSocket({ baseUrl: API_BASE_URL, token });
+    // getToken يُقيَّم عند كل محاولة اتصال — يجدد التوكن فلا يموت البث بعد 15 دقيقة
+    const s = createSocket({
+      baseUrl: API_BASE_URL,
+      getToken: () => api.getFreshAccessToken(),
+    });
 
     const invalidate = (...keys: string[][]) => {
       for (const key of keys) {

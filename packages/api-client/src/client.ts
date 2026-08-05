@@ -35,6 +35,11 @@ export interface ApiClient {
   post<T>(path: string, body?: unknown): Promise<T>;
   patch<T>(path: string, body?: unknown): Promise<T>;
   delete<T>(path: string, body?: unknown): Promise<T>;
+  /**
+   * توكن وصول صالح الآن — يجدد تلقائياً إن كان منتهياً أو على وشك الانتهاء.
+   * مخصص لاتصال الـ socket (مرره كـ getToken في createSocket).
+   */
+  getFreshAccessToken(): Promise<string | null>;
   readonly baseUrl: string;
   readonly storage: TokenStorage;
 }
@@ -141,6 +146,34 @@ export function createApiClient(opts: CreateApiClientOptions): ApiClient {
     return refreshPromise;
   }
 
+  /** قراءة exp من الـ JWT محلياً بلا تحقق توقيع (للجدولة فقط) */
+  function jwtExpMs(token: string): number | null {
+    try {
+      const payload = token.split('.')[1];
+      if (!payload) return null;
+      const b64 = payload.replace(/-/g, '+').replace(/_/g, '/');
+      // atob متوفر في Hermes والمتصفح وNode 16+ — يكفي دون Buffer
+      if (typeof atob !== 'function') return null;
+      const json = atob(b64);
+      const exp = (JSON.parse(json) as { exp?: number }).exp;
+      return typeof exp === 'number' ? exp * 1000 : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function getFreshAccessToken(): Promise<string | null> {
+    const access = await storage.getAccess();
+    if (access) {
+      const expMs = jwtExpMs(access);
+      // صالح لأكثر من دقيقة؟ استخدمه كما هو
+      if (expMs !== null && expMs - Date.now() > 60_000) return access;
+    }
+    const refreshed = await refreshOnce();
+    if (!refreshed) return access; // آخر محاولة: الموجود (قد يرفضه الخادم فيعاد لاحقاً)
+    return storage.getAccess();
+  }
+
   async function send(
     method: HttpMethod,
     path: string,
@@ -204,6 +237,7 @@ export function createApiClient(opts: CreateApiClientOptions): ApiClient {
   return {
     baseUrl,
     storage,
+    getFreshAccessToken,
     get<T>(path: string, query?: Record<string, unknown>): Promise<T> {
       return request<T>('GET', path, query);
     },
