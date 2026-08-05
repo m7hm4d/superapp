@@ -51,7 +51,9 @@ import { RealtimeModule } from './realtime/realtime.module';
     }),
     EventEmitterModule.forRoot(),
     ScheduleModule.forRoot(),
-    ThrottlerModule.forRoot([{ name: 'global', ttl: 60_000, limit: 120 }]),
+    // الاسم 'default' مقصود: تجاوزات @Throttle تُطابَق بالاسم، وأي اسم آخر
+    // يجعل حدود مسارات المصادقة تُهمَل بصمت ويبقى الحد العام وحده.
+    ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 120 }]),
     JwtModule.register({ global: true }),
     DrizzleModule,
     RealtimeModule,

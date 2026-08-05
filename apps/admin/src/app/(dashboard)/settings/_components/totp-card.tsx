@@ -1,20 +1,23 @@
 'use client';
 
-import { useState, type ChangeEvent } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { ApiError } from '@superapp/api-client';
+import type { AuthTokens, AuthUser } from '@superapp/shared';
 import { api } from '@/lib/api';
-import { Button, Input } from '@/components/ui';
+import { useAuth } from '@/lib/auth';
+import { Button } from '@/components/ui';
+import { TotpEnroll, type TotpSetupResponse } from '@/components/totp-enroll';
 
-interface TotpSetupResponse {
-  secret: string;
-  otpauthUrl: string;
+interface TotpStatus {
+  enabled: boolean;
+  pending: boolean;
 }
 
 const ERROR_AR: Record<string, string> = {
-  INVALID_TOTP: 'الرمز غير صحيح — تأكد من تطبيق المصادقة وحاول مجدداً',
+  TOTP_INVALID: 'الرمز غير صحيح — تأكد من تطبيق المصادقة وحاول مجدداً',
   TOTP_NOT_SETUP: 'ابدأ بالإعداد أولاً ثم أدخل الرمز',
-  VALIDATION_ERROR: 'أدخل رمزاً من 6 أرقام',
+  VALIDATION_ERROR: 'أدخل رمزاً من ٦ أرقام',
 };
 
 function arError(e: unknown): string {
@@ -23,50 +26,41 @@ function arError(e: unknown): string {
 }
 
 export function TotpCard() {
+  const { adoptSession } = useAuth();
   const [setup, setSetup] = useState<TotpSetupResponse | null>(null);
-  const [code, setCode] = useState('');
-  const [enabled, setEnabled] = useState(false);
   const [banner, setBanner] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [justEnabled, setJustEnabled] = useState(false);
+
+  const statusQuery = useQuery({
+    queryKey: ['totp', 'status'],
+    queryFn: () => api.get<TotpStatus>('auth/admin/totp/status'),
+  });
 
   const setupMutation = useMutation({
     mutationFn: () => api.post<TotpSetupResponse>('auth/admin/totp/setup'),
     onSuccess: (data) => {
       setBanner(null);
-      setEnabled(false);
-      setCode('');
+      setJustEnabled(false);
       setSetup(data);
     },
     onError: (e) => setBanner(arError(e)),
   });
 
   const enableMutation = useMutation({
-    mutationFn: (totp: string) => api.post('auth/admin/totp/enable', { totp }),
-    onSuccess: () => {
+    mutationFn: (totp: string) =>
+      api.post<{ user: AuthUser; tokens: AuthTokens }>('auth/admin/totp/enable', { totp }),
+    onSuccess: async (res) => {
+      // الخادم يصدر جلسة جديدة عند التفعيل — نتبنّاها كي لا تُبطل الجلسة الحالية
+      await adoptSession(res.user, res.tokens);
       setBanner(null);
-      setEnabled(true);
+      setSetup(null);
+      setJustEnabled(true);
+      void statusQuery.refetch();
     },
     onError: (e) => setBanner(arError(e)),
   });
 
-  const copySecret = async () => {
-    if (!setup) return;
-    try {
-      await navigator.clipboard.writeText(setup.secret);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      setBanner('تعذر النسخ — انسخ السر يدوياً');
-    }
-  };
-
-  if (enabled) {
-    return (
-      <div className="rounded-lg border border-green-300 bg-green-50 p-4 text-sm text-green-800">
-        فُعّلت المصادقة الثنائية بنجاح. ستُطلب منك رموز TOTP في كل تسجيل دخول قادم.
-      </div>
-    );
-  }
+  const enabled = statusQuery.data?.enabled ?? false;
 
   return (
     <div className="space-y-4 text-sm">
@@ -76,67 +70,54 @@ export function TotpCard() {
         </div>
       )}
 
-      {!setup ? (
+      {justEnabled && (
+        <div className="rounded-lg border border-green-300 bg-green-50 px-3 py-2 text-green-800">
+          سُجّل الجهاز الجديد بنجاح — استخدمه في عمليات الدخول القادمة.
+        </div>
+      )}
+
+      {setup ? (
         <>
-          <p className="text-gray-600">
-            المصادقة الثنائية (TOTP) تضيف طبقة حماية لحساب المشرف — مطلوبة قبل الإطلاق.
+          <p className="text-zinc-600">
+            {enabled
+              ? 'تسجيل جهاز جديد — جهازك الحالي يبقى فعّالاً حتى تؤكد الرمز من الجهاز الجديد.'
+              : 'سجّل جهازك لإكمال تفعيل المصادقة الثنائية.'}
           </p>
-          <Button
-            variant="primary"
-            loading={setupMutation.isPending}
-            onClick={() => setupMutation.mutate()}
-          >
-            إعداد المصادقة الثنائية
+          <TotpEnroll
+            setup={setup}
+            submitting={enableMutation.isPending}
+            error={null}
+            onConfirm={(code) => enableMutation.mutate(code)}
+          />
+          <Button variant="secondary" size="sm" onClick={() => setSetup(null)}>
+            إلغاء
           </Button>
         </>
       ) : (
         <>
-          <div>
-            <p className="mb-1 font-medium">1 — أضف هذا السر إلى تطبيق المصادقة</p>
-            <p className="text-gray-500">
-              في Google Authenticator أو ما يماثله اختر «إدخال مفتاح يدوياً» والصق السر:
+          {statusQuery.isPending ? (
+            <div className="h-5 w-56 animate-pulse rounded bg-zinc-100" />
+          ) : enabled ? (
+            <p className="text-green-700">
+              المصادقة الثنائية مفعّلة — يُطلب رمز من تطبيق المصادقة في كل دخول.
             </p>
-            <div className="mt-2 flex items-center gap-2">
-              <code
-                className="grow break-all rounded-lg bg-gray-100 px-3 py-2 font-mono text-xs"
-                dir="ltr"
-              >
-                {setup.secret}
-              </code>
-              <Button variant="secondary" size="sm" onClick={() => void copySecret()}>
-                {copied ? 'نُسخ' : 'نسخ'}
-              </Button>
-            </div>
-            <p className="mt-2 break-all font-mono text-xs text-gray-400" dir="ltr">
-              {setup.otpauthUrl}
+          ) : (
+            <p className="text-amber-700">
+              غير مفعّلة على هذا الحساب — لن تتمكن من الدخول قبل تسجيل جهاز مصادقة.
             </p>
-          </div>
-
-          <div>
-            <p className="mb-2 font-medium">2 — أدخل أول رمز يظهر في التطبيق</p>
-            <div className="flex items-end gap-2">
-              <div className="w-40">
-                <Input
-                  label="رمز من 6 أرقام"
-                  value={code}
-                  dir="ltr"
-                  inputMode="numeric"
-                  maxLength={6}
-                  onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                    setCode(e.target.value.replace(/\D/g, '').slice(0, 6))
-                  }
-                />
-              </div>
-              <Button
-                variant="primary"
-                disabled={code.length !== 6}
-                loading={enableMutation.isPending}
-                onClick={() => enableMutation.mutate(code)}
-              >
-                تفعيل
-              </Button>
-            </div>
-          </div>
+          )}
+          <Button
+            variant={enabled ? 'secondary' : 'primary'}
+            loading={setupMutation.isPending}
+            onClick={() => setupMutation.mutate()}
+          >
+            {enabled ? 'تسجيل جهاز جديد' : 'تفعيل المصادقة الثنائية'}
+          </Button>
+          {enabled && (
+            <p className="text-xs text-zinc-500">
+              تسجيل جهاز جديد يستبدل الجهاز الحالي بعد تأكيد أول رمز منه.
+            </p>
+          )}
         </>
       )}
     </div>

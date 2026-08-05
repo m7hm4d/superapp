@@ -9,6 +9,9 @@ export const envSchema = z.object({
   JWT_REFRESH_SECRET: z.string().min(16),
   JWT_REFRESH_TTL: z.string().default('30d'),
   CORS_ORIGINS: z.string().default('http://localhost:3001'),
+  /** حد محاولات مسارات المصادقة لكل IP في النافذة — يُرفع في الاختبارات فقط */
+  AUTH_THROTTLE_LIMIT: z.coerce.number().int().min(1).default(5),
+  AUTH_THROTTLE_TTL_MS: z.coerce.number().int().min(1000).default(60_000),
   DEFAULT_DELIVERY_FEE_IQD: z.coerce.number().int().default(2000),
   VENDOR_ACCEPT_TIMEOUT_MIN: z.coerce.number().int().default(10),
   BATCH_WINDOW_SEC: z.coerce.number().int().default(75),
