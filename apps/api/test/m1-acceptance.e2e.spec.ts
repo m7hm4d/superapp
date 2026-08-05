@@ -8,11 +8,12 @@ import { AppModule } from '../src/app.module';
 /**
  * قبول M1 (الخطة): طلب يمر بكل الحالات، الانتقالات غير الشرعية مرفوضة،
  * order_events كامل، rotation للتوكنات، idempotency، وحوكمة الموافقات.
- * يتطلب: قاعدة مهاجَرة + seed (أدمن +9647700000001).
+ * يتطلب: قاعدة مهاجَرة + seed مُشغَّل بنفس SEED_ADMIN_PASSWORD المتاح هنا.
  */
 
 const ADMIN_PHONE = '+9647700000001';
-const ADMIN_PASSWORD = 'Admin#12345';
+const ADMIN_EMAIL = 'admin@superapp.local';
+const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? '';
 const KARRADA = { lat: 33.306, lng: 44.426 };
 
 function randomIraqiPhone(): string {
@@ -90,12 +91,21 @@ describe('M1 acceptance', () => {
     customerAccess = login.body.tokens.accessToken;
   });
 
-  it('admin: logs in with seeded credentials', async () => {
+  it('admin: logs in via /auth/admin/login (email + password)', async () => {
+    expect(ADMIN_PASSWORD, 'SEED_ADMIN_PASSWORD مطلوب لاختبارات الأدمن').toBeTruthy();
+    const res = await request(http)
+      .post('/api/v1/auth/admin/login')
+      .send({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD })
+      .expect(200);
+    adminAccess = res.body.tokens.accessToken;
+  });
+
+  it('security: phone login rejects admin even with correct password (TOTP bypass closed)', async () => {
     const res = await request(http)
       .post('/api/v1/auth/login')
       .send({ phone: ADMIN_PHONE, password: ADMIN_PASSWORD })
-      .expect(200);
-    adminAccess = res.body.tokens.accessToken;
+      .expect(401);
+    expect(res.body.code).toBe('INVALID_CREDENTIALS');
   });
 
   it('vendor: registers pending, business routes locked with PENDING_APPROVAL', async () => {

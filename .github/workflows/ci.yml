@@ -33,6 +33,7 @@ jobs:
       DATABASE_URL: postgres://superapp:superapp@localhost:5432/superapp
       JWT_ACCESS_SECRET: ci-only-access-secret-0000000000
       JWT_REFRESH_SECRET: ci-only-refresh-secret-000000000
+      SEED_ADMIN_PASSWORD: ci-only-admin-password-00000000
       NODE_ENV: test
 
     steps:
