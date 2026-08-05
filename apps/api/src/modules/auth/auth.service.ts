@@ -141,6 +141,16 @@ export class AuthService {
       });
     }
 
+    // حسابات الإدارة لا تدخل من مسار الهاتف إطلاقاً — دخولها حصراً عبر
+    // /auth/admin/login (بريد + كلمة مرور + TOTP). الرد مطابق لخطأ الاعتماديات
+    // كي لا يكشف أن الرقم يعود لحساب إداري.
+    if (user.role === Role.ADMIN) {
+      throw new UnauthorizedException({
+        code: 'INVALID_CREDENTIALS',
+        message: 'رقم الهاتف أو كلمة المرور غير صحيحة',
+      });
+    }
+
     if (user.status === UserStatus.BLOCKED) {
       throw new ForbiddenException({ code: 'BLOCKED', message: 'الحساب محظور' });
     }

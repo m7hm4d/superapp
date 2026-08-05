@@ -6,7 +6,8 @@ set -euo pipefail
 BASE_URL="${BASE_URL:-http://localhost:3000}"
 API="$BASE_URL/api/v1"
 ADMIN_EMAIL="${ADMIN_EMAIL:-admin@superapp.local}"
-ADMIN_PASSWORD="${ADMIN_PASSWORD:-Admin#12345}"
+# لا كلمة مرور افتراضية — مرّرها صراحة: ADMIN_PASSWORD=... ./scripts/smoke.sh
+ADMIN_PASSWORD="${ADMIN_PASSWORD:?ADMIN_PASSWORD مطلوب (لم تعد هناك كلمة مرور افتراضية للأدمن)}"
 
 pass() { echo "✅ $1"; }
 fail() { echo "❌ $1"; exit 1; }

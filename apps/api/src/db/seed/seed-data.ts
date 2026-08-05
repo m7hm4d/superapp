@@ -25,9 +25,12 @@ export const FLAG_SEED: { key: FeatureFlagKey; enabled: boolean; value: string |
   { key: FeatureFlagKey.BATCH_MAX_SIZE, enabled: true, value: '{"max":3}' },
 ];
 
+/**
+ * لا كلمة مرور للأدمن هنا عمداً — الاعتماديات الإدارية لا تُنشر في المستودع.
+ * المصدر: SEED_ADMIN_PASSWORD عند تشغيل الـ seed، أو توليد عشوائي يُطبع مرة واحدة (seed.ts §3).
+ */
 export const ADMIN_SEED = {
   phone: '+9647700000001',
-  password: 'Admin#12345',
   fullName: 'مدير المنصة',
   email: 'admin@superapp.local',
 } as const;

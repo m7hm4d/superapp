@@ -5,6 +5,7 @@
  * إعادة التشغيل آمنة: upsert بالمفاتيح الطبيعية (هاتف/بريد/مفتاح/اسم)،
  * والطلبات التجريبية تُنشأ مرة واحدة فقط (تُتخطى إن وُجدت طلبات لعملاء الـ seed).
  */
+import { randomBytes } from 'node:crypto';
 import { drizzle, NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import { eq, and, inArray, sql } from 'drizzle-orm';
@@ -284,20 +285,52 @@ async function main(): Promise<void> {
     await ensureFlags(db);
 
     // 2) كلمات المرور (argon2id) — تجزئة واحدة لكل كلمة مشتركة
-    const [adminHash, vendorHash, driverHash, customerHash] = await Promise.all([
-      hashPassword(ADMIN_SEED.password),
+    const [vendorHash, driverHash, customerHash] = await Promise.all([
       hashPassword(VENDOR_PASSWORD),
       hashPassword(DRIVER_PASSWORD),
       hashPassword(CUSTOMER_PASSWORD),
     ]);
 
-    // 3) الإدارة
-    const admin = await ensureUser(db, {
-      phone: ADMIN_SEED.phone,
-      passwordHash: adminHash,
-      fullName: ADMIN_SEED.fullName,
-      role: Role.ADMIN,
-    });
+    // 3) الإدارة — كلمة المرور لا تُنشر في المستودع:
+    //    - SEED_ADMIN_PASSWORD موجود: يُعتمد ويُحدَّث الهاش حتى لو كان الأدمن قائماً (مسار تدوير).
+    //    - غير موجود وأدمن جديد: تُولَّد كلمة عشوائية وتُطبع مرة واحدة في جدول الاعتماديات أدناه.
+    //    - غير موجود وأدمن قائم: الهاش يبقى كما هو.
+    // بلا trim: القيمة تُستهلك حرفياً كما ستُرسل عند الدخول — أي تشذيب هنا يخلق عدم تطابق صامت
+    const envAdminPassword = process.env.SEED_ADMIN_PASSWORD || undefined;
+    const [existingAdmin] = await db
+      .select()
+      .from(users)
+      .where(eq(users.phone, normalizeIraqiPhone(ADMIN_SEED.phone)))
+      .limit(1);
+    if (existingAdmin && existingAdmin.role !== Role.ADMIN) {
+      throw new Error(`رقم الأدمن ${ADMIN_SEED.phone} مملوك لحساب بدور ${existingAdmin.role} — رفض المتابعة`);
+    }
+
+    let admin: UserRow;
+    let adminPasswordDisplay: string;
+    if (!existingAdmin) {
+      const adminPassword = envAdminPassword ?? randomBytes(18).toString('base64url');
+      admin = await ensureUser(db, {
+        phone: ADMIN_SEED.phone,
+        passwordHash: await hashPassword(adminPassword),
+        fullName: ADMIN_SEED.fullName,
+        role: Role.ADMIN,
+      });
+      adminPasswordDisplay = envAdminPassword
+        ? '(من SEED_ADMIN_PASSWORD)'
+        : `${adminPassword}  ← وُلِّدت الآن ولن تُعرض مجدداً`;
+    } else {
+      admin = existingAdmin;
+      if (envAdminPassword) {
+        await db
+          .update(users)
+          .set({ passwordHash: await hashPassword(envAdminPassword) })
+          .where(eq(users.id, admin.id));
+        adminPasswordDisplay = '(حُدِّثت من SEED_ADMIN_PASSWORD)';
+      } else {
+        adminPasswordDisplay = '(بلا تغيير — عيّن SEED_ADMIN_PASSWORD وأعد الـ seed للتدوير)';
+      }
+    }
     await db
       .insert(adminCredentials)
       .values({ userId: admin.id, email: ADMIN_SEED.email, totpEnabled: false })
@@ -594,7 +627,7 @@ async function main(): Promise<void> {
 
     console.log('===== Test credentials =====');
     console.table([
-      { role: 'admin', login: `${ADMIN_SEED.phone} / ${ADMIN_SEED.email}`, password: ADMIN_SEED.password },
+      { role: 'admin (لوحة الويب فقط)', login: ADMIN_SEED.email, password: adminPasswordDisplay },
       { role: 'vendor', login: '+9647701000001 .. +9647701000006', password: VENDOR_PASSWORD },
       { role: 'vendor (pending)', login: PENDING_VENDOR.phone, password: VENDOR_PASSWORD },
       { role: 'driver', login: '+9647702000001 .. +9647702000002', password: DRIVER_PASSWORD },

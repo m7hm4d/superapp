@@ -12,8 +12,8 @@ import { BatchingService } from '../src/modules/deliveries/batching.service';
  * التسوية تصفّر العهدة، وحركة تصحيح تنشئ قيداً عكسياً.
  */
 
-const ADMIN_PHONE = '+9647700000001';
-const ADMIN_PASSWORD = 'Admin#12345';
+const ADMIN_EMAIL = 'admin@superapp.local';
+const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? '';
 const KARRADA = { lat: 33.306, lng: 44.426 };
 
 function randomIraqiPhone(): string {
@@ -50,10 +50,10 @@ describe('M2 acceptance — batching, PINs, ledger, settlement', () => {
     await app?.close();
   });
 
-  async function login(phone: string, password: string): Promise<string> {
+  async function adminLogin(): Promise<string> {
     const res = await request(http)
-      .post('/api/v1/auth/login')
-      .send({ phone, password })
+      .post('/api/v1/auth/admin/login')
+      .send({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD })
       .expect(200);
     return res.body.tokens.accessToken;
   }
@@ -80,7 +80,7 @@ describe('M2 acceptance — batching, PINs, ledger, settlement', () => {
   }
 
   it('setup: actors registered and approved', async () => {
-    adminAccess = await login(ADMIN_PHONE, ADMIN_PASSWORD);
+    adminAccess = await adminLogin();
 
     vendorAccess = await registerAndApprove('vendor', {
       role: 'vendor',
