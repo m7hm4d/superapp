@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "lib": ["ES2022"],
+    "paths": {
+      "@superapp/shared": ["../shared/src/index.ts"],
+      "@superapp/shared/*": ["../shared/src/*"],
+      "@superapp/i18n": ["../i18n/src/index.ts"]
+    }
+  },
+  "include": ["src"]
+}

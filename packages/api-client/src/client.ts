@@ -1,0 +1,220 @@
+import type { TokenStorage } from './storage';
+import { uuid } from './uuid';
+
+/** خطأ API موحّد: {code, message?, requestId} من الباكند. */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code: string;
+  readonly requestId?: string;
+  readonly body: unknown;
+
+  constructor(opts: {
+    status: number;
+    code: string;
+    message?: string;
+    requestId?: string;
+    body?: unknown;
+  }) {
+    super(opts.message ?? opts.code);
+    this.name = 'ApiError';
+    this.status = opts.status;
+    this.code = opts.code;
+    this.requestId = opts.requestId;
+    this.body = opts.body;
+  }
+}
+
+export interface CreateApiClientOptions {
+  baseUrl: string;
+  storage: TokenStorage;
+  onUnauthorized?: () => void;
+}
+
+export interface ApiClient {
+  get<T>(path: string, query?: Record<string, unknown>): Promise<T>;
+  post<T>(path: string, body?: unknown): Promise<T>;
+  patch<T>(path: string, body?: unknown): Promise<T>;
+  delete<T>(path: string, body?: unknown): Promise<T>;
+  readonly baseUrl: string;
+  readonly storage: TokenStorage;
+}
+
+const API_PREFIX = '/api/v1';
+
+type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
+
+interface ErrorBody {
+  code?: unknown;
+  message?: unknown;
+  requestId?: unknown;
+}
+
+function buildUrl(
+  baseUrl: string,
+  path: string,
+  query?: Record<string, unknown>,
+): string {
+  const base = baseUrl.replace(/\/+$/, '');
+  let p = path.replace(/^\/+/, '');
+  if (p.startsWith('api/v1/')) {
+    p = p.slice('api/v1/'.length);
+  }
+  let url = `${base}${API_PREFIX}/${p}`;
+  if (query) {
+    const params: string[] = [];
+    for (const [key, value] of Object.entries(query)) {
+      if (value === undefined || value === null) continue;
+      params.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`);
+    }
+    if (params.length > 0) {
+      url += `?${params.join('&')}`;
+    }
+  }
+  return url;
+}
+
+async function parseJsonSafe(res: Response): Promise<unknown> {
+  const text = await res.text().catch(() => '');
+  if (!text) return undefined;
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
+  }
+}
+
+function toApiError(status: number, body: unknown, fallbackRequestId?: string): ApiError {
+  const e = (body ?? {}) as ErrorBody;
+  return new ApiError({
+    status,
+    code: typeof e.code === 'string' && e.code.length > 0 ? e.code : `HTTP_${status}`,
+    message: typeof e.message === 'string' ? e.message : undefined,
+    requestId:
+      typeof e.requestId === 'string' ? e.requestId : fallbackRequestId,
+    body,
+  });
+}
+
+export function createApiClient(opts: CreateApiClientOptions): ApiClient {
+  const { baseUrl, storage, onUnauthorized } = opts;
+
+  /** وعد تجديد واحد مشترك بين كل طلبات 401 المتزامنة. */
+  let refreshPromise: Promise<boolean> | null = null;
+
+  async function doRefresh(): Promise<boolean> {
+    try {
+      const refreshToken = await storage.getRefresh();
+      if (!refreshToken) return false;
+      const res = await fetch(buildUrl(baseUrl, 'auth/refresh'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+      });
+      if (!res.ok) return false;
+      const data = (await parseJsonSafe(res)) as
+        | { tokens?: { accessToken?: unknown; refreshToken?: unknown } }
+        | undefined;
+      const tokens = data?.tokens;
+      if (
+        !tokens ||
+        typeof tokens.accessToken !== 'string' ||
+        typeof tokens.refreshToken !== 'string'
+      ) {
+        return false;
+      }
+      await storage.set({
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function refreshOnce(): Promise<boolean> {
+    if (!refreshPromise) {
+      refreshPromise = doRefresh().finally(() => {
+        refreshPromise = null;
+      });
+    }
+    return refreshPromise;
+  }
+
+  async function send(
+    method: HttpMethod,
+    path: string,
+    query?: Record<string, unknown>,
+    body?: unknown,
+  ): Promise<Response> {
+    const headers: Record<string, string> = {};
+    const access = await storage.getAccess();
+    if (access) {
+      headers['Authorization'] = `Bearer ${access}`;
+    }
+    if (method === 'POST' || method === 'PATCH' || method === 'DELETE') {
+      headers['x-idempotency-key'] = uuid();
+    }
+    const init: RequestInit = { method, headers };
+    if (body !== undefined) {
+      headers['Content-Type'] = 'application/json';
+      init.body = JSON.stringify(body);
+    }
+    return fetch(buildUrl(baseUrl, path, query), init);
+  }
+
+  function isAuthPath(path: string): boolean {
+    const p = path.replace(/^\/+/, '').replace(/^api\/v1\//, '');
+    return p === 'auth/login' || p === 'auth/register' || p === 'auth/refresh';
+  }
+
+  async function request<T>(
+    method: HttpMethod,
+    path: string,
+    query?: Record<string, unknown>,
+    body?: unknown,
+  ): Promise<T> {
+    let res = await send(method, path, query, body);
+
+    if (res.status === 401 && !isAuthPath(path)) {
+      const refreshed = await refreshOnce();
+      if (refreshed) {
+        // إعادة المحاولة مرة واحدة فقط بعد تجديد ناجح.
+        res = await send(method, path, query, body);
+      } else {
+        await storage.clear();
+        onUnauthorized?.();
+        const errBody = await parseJsonSafe(res);
+        throw toApiError(res.status, errBody);
+      }
+    }
+
+    const data = await parseJsonSafe(res);
+    if (!res.ok) {
+      if (res.status === 401 && !isAuthPath(path)) {
+        // التجديد نجح لكن الطلب المعاد ما زال 401 → جلسة غير صالحة.
+        await storage.clear();
+        onUnauthorized?.();
+      }
+      throw toApiError(res.status, data);
+    }
+    return data as T;
+  }
+
+  return {
+    baseUrl,
+    storage,
+    get<T>(path: string, query?: Record<string, unknown>): Promise<T> {
+      return request<T>('GET', path, query);
+    },
+    post<T>(path: string, body?: unknown): Promise<T> {
+      return request<T>('POST', path, undefined, body);
+    },
+    patch<T>(path: string, body?: unknown): Promise<T> {
+      return request<T>('PATCH', path, undefined, body);
+    },
+    delete<T>(path: string, body?: unknown): Promise<T> {
+      return request<T>('DELETE', path, undefined, body);
+    },
+  };
+}

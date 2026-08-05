@@ -1,0 +1,28 @@
+{
+  "name": "@superapp/api-client",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@superapp/shared": "workspace:*",
+    "socket.io-client": "^4.8.1"
+  },
+  "peerDependencies": {
+    "expo-secure-store": "*"
+  },
+  "peerDependenciesMeta": {
+    "expo-secure-store": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2"
+  }
+}
