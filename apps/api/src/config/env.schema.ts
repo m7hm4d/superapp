@@ -9,6 +9,14 @@ export const envSchema = z.object({
   JWT_REFRESH_SECRET: z.string().min(16),
   JWT_REFRESH_TTL: z.string().default('30d'),
   CORS_ORIGINS: z.string().default('http://localhost:3001'),
+  /**
+   * WebAuthn: المفتاح مربوط بالنطاق تشفيرياً، ولا يقبل عنوان IP إطلاقاً.
+   * RP_ID نطاق مجرّد (admin.example.com) وORIGIN أصل كامل بمنفذه.
+   * الافتراضي localhost للتطوير — يُضبط بنطاق الإنتاج عند النشر.
+   */
+  WEBAUTHN_RP_ID: z.string().default('localhost'),
+  WEBAUTHN_RP_NAME: z.string().default('SuperApp Admin'),
+  WEBAUTHN_ORIGINS: z.string().default('http://localhost:3001'),
   /** حد محاولات مسارات المصادقة لكل IP في النافذة — يُرفع في الاختبارات فقط */
   AUTH_THROTTLE_LIMIT: z.coerce.number().int().min(1).default(5),
   AUTH_THROTTLE_TTL_MS: z.coerce.number().int().min(1000).default(60_000),

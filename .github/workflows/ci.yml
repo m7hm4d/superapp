@@ -38,6 +38,9 @@ jobs:
       SEED_ADMIN_TOTP_SECRET: KRSXG5CTMVRXEZLUKBSGC5DBORSA
       # نافذة قصيرة وحد أوسع: الاختبارات المتوازية تشترك في IP واحد، والمهم
       # إثبات أن الحد يرفض فعلاً (الإنتاج يبقى على 5/دقيقة الافتراضيين)
+      # WebAuthn في الاختبارات: نطاق التطوير المسموح به في المواصفة
+      WEBAUTHN_RP_ID: localhost
+      WEBAUTHN_ORIGINS: http://localhost:3001
       AUTH_THROTTLE_LIMIT: 60
       AUTH_THROTTLE_TTL_MS: 3000
       NODE_ENV: test

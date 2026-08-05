@@ -53,6 +53,43 @@ export const adminCredentials = pgTable('admin_credentials', {
   lastTotpStep: bigint('last_totp_step', { mode: 'number' }),
 });
 
+/**
+ * مفاتيح المرور (WebAuthn) للإدارة: عامل مقاوم للتصيّد — الاعتماد مربوط
+ * بالنطاق تشفيرياً، فصفحة مزيّفة لا تحصل على شيء قابل للتمرير (خلاف TOTP).
+ * الاسترداد عند ضياع الهاتف يتكفّل به مزامنة المفاتيح (iCloud/Google).
+ */
+export const adminPasskeys = pgTable(
+  'admin_passkeys',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    credentialId: text('credential_id').notNull().unique(), // base64url
+    publicKey: text('public_key').notNull(), // base64url (COSE)
+    counter: bigint('counter', { mode: 'number' }).notNull().default(0),
+    transports: text('transports'), // JSON نصي
+    label: text('label').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+  },
+  (t) => [index('admin_passkeys_user_idx').on(t.userId)],
+);
+
+export const webauthnPurposeEnum = pgEnum('webauthn_purpose', ['register', 'login']);
+
+/** تحدٍّ واحد الاستعمال بعمر قصير — يُحذف فور التحقق منه */
+export const webauthnChallenges = pgTable(
+  'webauthn_challenges',
+  {
+    challenge: text('challenge').primaryKey(),
+    purpose: webauthnPurposeEnum('purpose').notNull(),
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [index('webauthn_challenges_expiry_idx').on(t.expiresAt)],
+);
+
 export const authEventOutcomeEnum = pgEnum('auth_event_outcome', [
   'success',
   'invalid_credentials',
@@ -72,6 +109,7 @@ export const authEventOutcomeEnum = pgEnum('auth_event_outcome', [
 export const authEventMethodEnum = pgEnum('auth_event_method', [
   'phone_password',
   'admin_password_totp',
+  'admin_passkey',
   'refresh',
   'logout',
   'admin_action',

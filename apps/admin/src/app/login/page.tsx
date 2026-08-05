@@ -2,15 +2,21 @@
 
 import { ShieldCheck } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { ApiError } from '@superapp/api-client';
+import { KeyRound } from 'lucide-react';
 import { Button, Input } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
+import { loginWithPasskey, passkeySupported } from '@/lib/passkey';
 
 /** A-01 دخول آمن: بريد + كلمة مرور، وحقل TOTP يظهر عند طلبه من الخادم. */
 
 const ERROR_MESSAGES: Record<string, string> = {
   INVALID_CREDENTIALS: 'البريد أو كلمة المرور غير صحيحة',
+  USE_PASSKEY: 'هذا الحساب يدخل بمفتاح المرور — استخدم الزر أعلاه',
+  PASSKEY_UNKNOWN: 'هذا المفتاح غير مسجّل في اللوحة',
+  PASSKEY_INVALID: 'تعذّر التحقق من المفتاح',
+  PASSKEY_CHALLENGE_EXPIRED: 'انتهت مهلة المحاولة — أعد الضغط على الزر',
   TOTP_INVALID: 'رمز التحقق غير صحيح — جرّب الرمز الحالي في تطبيق المصادقة',
   TOTP_ALREADY_USED: 'هذا الرمز استُعمل — انتظر الرمز التالي في التطبيق',
   BLOCKED: 'هذا الحساب محظور — راجع مسؤول النظام',
@@ -18,7 +24,7 @@ const ERROR_MESSAGES: Record<string, string> = {
 
 export default function LoginPage() {
   const router = useRouter();
-  const { login } = useAuth();
+  const { login, adoptSession } = useAuth();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -26,6 +32,33 @@ export default function LoginPage() {
   const [totpRequired, setTotpRequired] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [passkeyLoading, setPasskeyLoading] = useState(false);
+  const [canUsePasskey, setCanUsePasskey] = useState(false);
+
+  useEffect(() => setCanUsePasskey(passkeySupported()), []);
+
+  async function onPasskey() {
+    if (passkeyLoading) return;
+    setError(null);
+    setPasskeyLoading(true);
+    try {
+      const res = await loginWithPasskey();
+      await adoptSession(res.user, res.tokens);
+      router.replace('/overview');
+    } catch (err) {
+      // إلغاء المستخدم لنافذة النظام ليس خطأً يستحق رسالة حمراء
+      if (err instanceof DOMException && err.name === 'NotAllowedError') {
+        setPasskeyLoading(false);
+        return;
+      }
+      setError(
+        err instanceof ApiError
+          ? (ERROR_MESSAGES[err.code] ?? `تعذّر الدخول بمفتاح المرور (${err.code})`)
+          : 'تعذّر الدخول بمفتاح المرور',
+      );
+      setPasskeyLoading(false);
+    }
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -67,6 +100,25 @@ export default function LoginPage() {
           <h1 className="text-xl font-bold text-zinc-900">لوحة الإدارة</h1>
           <p className="text-sm text-zinc-500">دخول مخصص لفريق التشغيل فقط</p>
         </div>
+
+        {canUsePasskey && (
+          <div className="mb-4 rounded-card border border-zinc-200 bg-white p-4 shadow-sm">
+            <Button
+              type="button"
+              className="w-full"
+              loading={passkeyLoading}
+              onClick={() => void onPasskey()}
+            >
+              <span className="flex items-center justify-center gap-2">
+                <KeyRound size={18} aria-hidden />
+                الدخول بمفتاح المرور
+              </span>
+            </Button>
+            <p className="mt-2 text-center text-xs text-zinc-500">
+              بصمة أو رمز الجهاز — بلا كلمة مرور ولا رمز تحقق
+            </p>
+          </div>
+        )}
 
         <form
           onSubmit={(e) => void onSubmit(e)}
