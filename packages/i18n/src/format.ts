@@ -11,7 +11,15 @@ function forceLatinDigits(text: string): string {
   let out = '';
   for (const ch of text) {
     const i = ARABIC_INDIC.indexOf(ch);
-    out += i >= 0 ? String(i) : ch;
+    if (i >= 0) {
+      out += String(i);
+    } else if (ch === '٬') {
+      out += ','; // فاصل الآلاف العربي
+    } else if (ch === '٫') {
+      out += '.'; // الفاصلة العشرية العربية
+    } else {
+      out += ch;
+    }
   }
   return out;
 }
