@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { LoggerModule } from 'nestjs-pino';
 import { ApprovedGuard } from './common/approved.guard';
 import { AllExceptionsFilter } from './common/http-exception.filter';
+import { IdempotencyPurgeService } from './common/idempotency-purge.service';
 import { IdempotencyInterceptor } from './common/idempotency.interceptor';
 import { JwtAuthGuard } from './common/jwt-auth.guard';
 import { RolesGuard } from './common/roles.guard';
@@ -68,6 +69,7 @@ import { RealtimeModule } from './realtime/realtime.module';
     { provide: APP_GUARD, useClass: ApprovedGuard },
     { provide: APP_INTERCEPTOR, useClass: IdempotencyInterceptor },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
+    IdempotencyPurgeService,
   ],
 })
 export class AppModule {}

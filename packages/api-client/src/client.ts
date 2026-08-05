@@ -185,7 +185,8 @@ export function createApiClient(opts: CreateApiClientOptions): ApiClient {
     if (access) {
       headers['Authorization'] = `Bearer ${access}`;
     }
-    if (method === 'POST' || method === 'PATCH' || method === 'DELETE') {
+    // استجابات auth تحمل توكنات/أسرار TOTP — الخادم يستثنيها من الكاش ولا نرسل مفتاحاً لها أصلاً
+    if ((method === 'POST' || method === 'PATCH' || method === 'DELETE') && !isSensitivePath(path)) {
       headers['x-idempotency-key'] = uuid();
     }
     const init: RequestInit = { method, headers };
@@ -199,6 +200,12 @@ export function createApiClient(opts: CreateApiClientOptions): ApiClient {
   function isAuthPath(path: string): boolean {
     const p = path.replace(/^\/+/, '').replace(/^api\/v1\//, '');
     return p === 'auth/login' || p === 'auth/register' || p === 'auth/refresh';
+  }
+
+  /** كل ما تحت auth/ (يشمل admin/totp) — لا idempotency له */
+  function isSensitivePath(path: string): boolean {
+    const p = path.replace(/^\/+/, '').replace(/^api\/v1\//, '');
+    return p === 'auth' || p.startsWith('auth/');
   }
 
   async function request<T>(
