@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "سوبر آب — المخبز",
+    "slug": "superapp-vendor",
+    "version": "0.1.0",
+    "scheme": "superapp-vendor",
+    "orientation": "portrait",
+    "newArchEnabled": true,
+    "userInterfaceStyle": "light",
+    "platforms": [
+      "ios",
+      "android"
+    ],
+    "extra": {
+      "supportsRTL": true
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store"
+    ],
+    "ios": {
+      "bundleIdentifier": "iq.superapp.vendor",
+      "supportsTablet": false
+    },
+    "android": {
+      "package": "iq.superapp.vendor",
+      "edgeToEdgeEnabled": true
+    },
+    "experiments": {
+      "tsconfigPaths": false
+    }
+  }
+}

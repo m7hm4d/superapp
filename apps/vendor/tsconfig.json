@@ -1,0 +1,53 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "nativewind",
+    "moduleResolution": "bundler",
+    "paths": {
+      "@superapp/shared": [
+        "../../packages/shared/src/index.ts"
+      ],
+      "@superapp/shared/*": [
+        "../../packages/shared/src/*"
+      ],
+      "@superapp/i18n": [
+        "../../packages/i18n/src/index.ts"
+      ],
+      "@superapp/ui": [
+        "../../packages/ui/src/index.ts"
+      ],
+      "@superapp/api-client": [
+        "../../packages/api-client/src/index.ts"
+      ],
+      "react": [
+        "./node_modules/@types/react"
+      ],
+      "react-native": [
+        "./node_modules/react-native"
+      ],
+      "@superapp/map": [
+        "../../packages/map/src"
+      ],
+      "react/jsx-runtime": [
+        "./node_modules/@types/react/jsx-runtime"
+      ]
+    },
+    "baseUrl": "."
+  },
+  "include": [
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "expo-env.d.ts",
+    ".expo/types/**/*.ts",
+    "nativewind-env.d.ts"
+  ]
+}
