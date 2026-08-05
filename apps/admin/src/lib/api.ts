@@ -7,7 +7,7 @@ import {
   type UseQueryOptions,
   type UseQueryResult,
 } from '@tanstack/react-query';
-import { localStorageTokens } from './storage';
+import { enrollmentTokens, localStorageTokens } from './storage';
 
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
@@ -32,6 +32,15 @@ export const api = createApiClient({
       window.location.href = '/login';
     }
   },
+});
+
+/**
+ * عميل تسجيل TOTP: يحمل التوكن المحدود بدل توكن الجلسة، بلا تجديد ولا
+ * إعادة توجيه — انتهاء صلاحيته يعالجه مسار التسجيل نفسه.
+ */
+export const enrollApi = createApiClient({
+  baseUrl: API_BASE_URL,
+  storage: enrollmentTokens,
 });
 
 export { ApiError };

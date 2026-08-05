@@ -336,6 +336,24 @@ async function main(): Promise<void> {
       .values({ userId: admin.id, email: ADMIN_SEED.email, totpEnabled: false })
       .onConflictDoNothing();
 
+    // TOTP إلزامي للدخول الإداري. للتطوير والاختبارات الآلية فقط: سرّ معلوم
+    // يُمرَّر عبر SEED_ADMIN_TOTP_SECRET فيُسجَّل جاهزاً. في أي بيئة حقيقية
+    // يُترك فارغاً — فيسجّل الأدمن جهازه بنفسه عند أول دخول (QR في اللوحة).
+    const envTotpSecret = process.env.SEED_ADMIN_TOTP_SECRET?.trim() || undefined;
+    let adminTotpDisplay = '(يُسجَّل عند أول دخول عبر QR)';
+    if (envTotpSecret) {
+      await db
+        .update(adminCredentials)
+        .set({
+          totpSecret: envTotpSecret,
+          pendingTotpSecret: null,
+          totpEnabled: true,
+          lastTotpStep: null,
+        })
+        .where(eq(adminCredentials.userId, admin.id));
+      adminTotpDisplay = '(مسجَّل من SEED_ADMIN_TOTP_SECRET — للتطوير فقط)';
+    }
+
     // 4) البائعون المعتمدون + منتجاتهم
     const vendorByPhone = new Map<
       string,
@@ -627,7 +645,11 @@ async function main(): Promise<void> {
 
     console.log('===== Test credentials =====');
     console.table([
-      { role: 'admin (لوحة الويب فقط)', login: ADMIN_SEED.email, password: adminPasswordDisplay },
+      {
+        role: 'admin (لوحة الويب فقط)',
+        login: ADMIN_SEED.email,
+        password: `${adminPasswordDisplay} + TOTP ${adminTotpDisplay}`,
+      },
       { role: 'vendor', login: '+9647701000001 .. +9647701000006', password: VENDOR_PASSWORD },
       { role: 'vendor (pending)', login: PENDING_VENDOR.phone, password: VENDOR_PASSWORD },
       { role: 'driver', login: '+9647702000001 .. +9647702000002', password: DRIVER_PASSWORD },

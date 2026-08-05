@@ -1,4 +1,4 @@
-import { boolean, index, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { bigint, boolean, index, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { geographyPoint } from './_geo';
 
 export const roleEnum = pgEnum('role', ['customer', 'vendor', 'driver', 'admin']);
@@ -36,14 +36,21 @@ export const refreshTokens = pgTable(
   (t) => [index('refresh_tokens_user_idx').on(t.userId), index('refresh_tokens_family_idx').on(t.familyId)],
 );
 
-/** دخول الإدارة: بريد + كلمة مرور + TOTP — مستقل عن تدفق الهاتف */
+/**
+ * دخول الإدارة: بريد + كلمة مرور + TOTP إلزامي — مستقل عن تدفق الهاتف.
+ * السر قيد التسجيل يُحفظ في pending_totp_secret ولا يلمس السر الفعّال،
+ * فإعادة التسجيل لا تُعطّل تطبيق المصادقة القائم قبل تأكيد الجديد.
+ * last_totp_step يمنع إعادة استخدام الرمز نفسه داخل نافذته.
+ */
 export const adminCredentials = pgTable('admin_credentials', {
   userId: uuid('user_id')
     .primaryKey()
     .references(() => users.id, { onDelete: 'cascade' }),
   email: text('email').notNull().unique(),
   totpSecret: text('totp_secret'),
+  pendingTotpSecret: text('pending_totp_secret'),
   totpEnabled: boolean('totp_enabled').notNull().default(false),
+  lastTotpStep: bigint('last_totp_step', { mode: 'number' }),
 });
 
 export const customerAddresses = pgTable(

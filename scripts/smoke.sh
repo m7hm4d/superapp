@@ -25,12 +25,22 @@ CITY_LAT=$(echo "$CONFIG" | jq -r '.city.centerLat')
 CITY_LNG=$(echo "$CONFIG" | jq -r '.city.centerLng')
 pass "config: flags + city ($CITY_LAT,$CITY_LNG)"
 
-# 3) دخول الأدمن بالبريد
-ADMIN_TOKEN=$(curl -fsS -X POST "$API/auth/admin/login" \
+# 3) دخول الأدمن بالبريد + TOTP (إلزامي)
+#    مرّر ADMIN_TOTP (الرمز الظاهر في تطبيق المصادقة)، أو ADMIN_TOTP_SECRET ليُحسب هنا.
+if [ -z "${ADMIN_TOTP:-}" ] && [ -n "${ADMIN_TOTP_SECRET:-}" ]; then
+  ADMIN_TOTP=$(node -e "process.stdout.write(require('otplib').authenticator.generate(process.argv[1]))" "$ADMIN_TOTP_SECRET" 2>/dev/null) \
+    || fail "تعذّر حساب رمز TOTP — مرّر ADMIN_TOTP مباشرة"
+fi
+[ -n "${ADMIN_TOTP:-}" ] || fail "ADMIN_TOTP مطلوب (أو ADMIN_TOTP_SECRET) — TOTP إلزامي لدخول الإدارة"
+
+ADMIN_LOGIN=$(curl -fsS -X POST "$API/auth/admin/login" \
   -H 'content-type: application/json' \
-  -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\"}" | jq -r '.tokens.accessToken')
+  -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\",\"totp\":\"$ADMIN_TOTP\"}")
+echo "$ADMIN_LOGIN" | jq -e '.status == "ok"' >/dev/null \
+  || fail "admin login — الحساب يحتاج تسجيل جهاز مصادقة من اللوحة أولاً"
+ADMIN_TOKEN=$(echo "$ADMIN_LOGIN" | jq -r '.tokens.accessToken')
 [ "$ADMIN_TOKEN" != "null" ] || fail "admin login"
-pass "admin login"
+pass "admin login (2FA)"
 
 # 4) المتاجر القريبة (PostGIS)
 NEARBY=$(curl -fsS "$API/vendors/nearby?lat=$CITY_LAT&lng=$CITY_LNG&radius=5000")

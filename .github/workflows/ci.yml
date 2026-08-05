@@ -34,6 +34,12 @@ jobs:
       JWT_ACCESS_SECRET: ci-only-access-secret-0000000000
       JWT_REFRESH_SECRET: ci-only-refresh-secret-000000000
       SEED_ADMIN_PASSWORD: ci-only-admin-password-00000000
+      # سر TOTP ثابت للاختبارات الآلية فقط (base32) — TOTP إلزامي لدخول الإدارة
+      SEED_ADMIN_TOTP_SECRET: KRSXG5CTMVRXEZLUKBSGC5DBORSA
+      # نافذة قصيرة وحد أوسع: الاختبارات المتوازية تشترك في IP واحد، والمهم
+      # إثبات أن الحد يرفض فعلاً (الإنتاج يبقى على 5/دقيقة الافتراضيين)
+      AUTH_THROTTLE_LIMIT: 60
+      AUTH_THROTTLE_TTL_MS: 3000
       NODE_ENV: test
 
     steps:

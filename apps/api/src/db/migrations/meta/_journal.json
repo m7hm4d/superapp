@@ -15,6 +15,13 @@
       "when": 1785942584909,
       "tag": "0001_narrow_smiling_tiger",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785961816024,
+      "tag": "0002_eminent_silver_fox",
+      "breakpoints": true
     }
   ]
 }

@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module';
+import { loginAdmin } from './helpers/admin-login';
 import { IdempotencyPurgeService } from '../src/common/idempotency-purge.service';
 import { DB, DbClient } from '../src/db/drizzle.module';
 import { idempotencyKeys, orders } from '../src/db/schema';
@@ -12,11 +13,9 @@ import { idempotencyKeys, orders } from '../src/db/schema';
 /**
  * ضمانات idempotency (الملف §5): الذرية تحت التزامن، عدم تخزين استجابات
  * المصادقة (توكنات/أسرار TOTP)، فك الادعاء عند الفشل، والاحتفاظ المحدود.
- * يتطلب: قاعدة مهاجَرة + seed مُشغَّل بنفس SEED_ADMIN_PASSWORD المتاح هنا.
+ * يتطلب: قاعدة مهاجَرة + seed بنفس SEED_ADMIN_PASSWORD وSEED_ADMIN_TOTP_SECRET.
  */
 
-const ADMIN_EMAIL = 'admin@superapp.local';
-const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? '';
 const KARRADA = { lat: 33.306, lng: 44.426 };
 const CUSTOMER_PASSWORD = 'Customer#123';
 const HOUR_MS = 3_600_000;
@@ -68,12 +67,7 @@ describe('idempotency guarantees', () => {
     http = app.getHttpServer();
     db = app.get(DB);
 
-    expect(ADMIN_PASSWORD, 'SEED_ADMIN_PASSWORD مطلوب لتهيئة هذا الاختبار').toBeTruthy();
-    const adminRes = await request(http)
-      .post('/api/v1/auth/admin/login')
-      .send({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD })
-      .expect(200);
-    const adminAccess = adminRes.body.tokens.accessToken;
+    const adminAccess = await loginAdmin(http);
 
     const vendorPhone = randomIraqiPhone();
     const vendorReg = await request(http)

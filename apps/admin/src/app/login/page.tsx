@@ -12,6 +12,7 @@ import { useAuth } from '@/lib/auth';
 const ERROR_MESSAGES: Record<string, string> = {
   INVALID_CREDENTIALS: 'البريد أو كلمة المرور غير صحيحة',
   TOTP_INVALID: 'رمز التحقق غير صحيح — جرّب الرمز الحالي في تطبيق المصادقة',
+  TOTP_ALREADY_USED: 'هذا الرمز استُعمل — انتظر الرمز التالي في التطبيق',
   BLOCKED: 'هذا الحساب محظور — راجع مسؤول النظام',
 };
 
@@ -32,12 +33,13 @@ export default function LoginPage() {
     setError(null);
     setLoading(true);
     try {
-      await login(
+      const outcome = await login(
         email.trim(),
         password,
         totpRequired && totp ? totp : undefined,
       );
-      router.replace('/overview');
+      // حساب لم يسجّل جهاز المصادقة بعد — لا جلسة إدارية قبل التسجيل
+      router.replace(outcome.kind === 'enrollment' ? '/enroll' : '/overview');
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.code === 'TOTP_REQUIRED') {

@@ -5,6 +5,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module';
+import { loginAdmin } from './helpers/admin-login';
 import { DB, DbClient } from '../src/db/drizzle.module';
 import {
   adminAuditLog,
@@ -19,11 +20,9 @@ import {
  * ضمانات آلة 3 ضد ازدواج التسوية (الملف §8.3): لقطة المستحق تُحسب داخل
  * معاملة القفل، وتسوية DISPUTED تحجب بدء تسوية جديدة لنفس الثنائي —
  * فلا يمكن خصم عهدة السائق مرتين عن الطلبات نفسها.
- * يتطلب: قاعدة مهاجَرة + seed مُشغَّل بنفس SEED_ADMIN_PASSWORD المتاح هنا.
+ * يتطلب: قاعدة مهاجَرة + seed بنفس SEED_ADMIN_PASSWORD وSEED_ADMIN_TOTP_SECRET.
  */
 
-const ADMIN_EMAIL = 'admin@superapp.local';
-const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? '';
 const KARRADA = { lat: 33.306, lng: 44.426 };
 
 function randomIraqiPhone(): string {
@@ -100,13 +99,12 @@ describe('settlement doubling guarantees', () => {
     http = app.getHttpServer();
     db = app.get(DB);
 
-    expect(ADMIN_PASSWORD, 'SEED_ADMIN_PASSWORD مطلوب لتهيئة هذا الاختبار').toBeTruthy();
-    const adminRes = await request(http)
-      .post('/api/v1/auth/admin/login')
-      .send({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD })
+    adminAccess = await loginAdmin(http);
+    const me = await request(http)
+      .get('/api/v1/auth/me')
+      .set('Authorization', `Bearer ${adminAccess}`)
       .expect(200);
-    adminAccess = adminRes.body.tokens.accessToken;
-    adminUserId = adminRes.body.user.id;
+    adminUserId = me.body.user.id;
 
     const [city] = await db.select({ id: cities.id }).from(cities).limit(1);
     expect(city).toBeTruthy();

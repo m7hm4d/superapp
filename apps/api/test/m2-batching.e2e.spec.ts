@@ -4,6 +4,7 @@ import { randomInt, randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module';
+import { loginAdmin } from './helpers/admin-login';
 import { BatchingService } from '../src/modules/deliveries/batching.service';
 
 /**
@@ -12,8 +13,6 @@ import { BatchingService } from '../src/modules/deliveries/batching.service';
  * التسوية تصفّر العهدة، وحركة تصحيح تنشئ قيداً عكسياً.
  */
 
-const ADMIN_EMAIL = 'admin@superapp.local';
-const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? '';
 const KARRADA = { lat: 33.306, lng: 44.426 };
 
 function randomIraqiPhone(): string {
@@ -50,14 +49,6 @@ describe('M2 acceptance — batching, PINs, ledger, settlement', () => {
     await app?.close();
   });
 
-  async function adminLogin(): Promise<string> {
-    const res = await request(http)
-      .post('/api/v1/auth/admin/login')
-      .send({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD })
-      .expect(200);
-    return res.body.tokens.accessToken;
-  }
-
   async function registerAndApprove(
     role: 'vendor' | 'driver',
     body: Record<string, unknown>,
@@ -80,7 +71,7 @@ describe('M2 acceptance — batching, PINs, ledger, settlement', () => {
   }
 
   it('setup: actors registered and approved', async () => {
-    adminAccess = await adminLogin();
+    adminAccess = await loginAdmin(http);
 
     vendorAccess = await registerAndApprove('vendor', {
       role: 'vendor',

@@ -11,6 +11,13 @@ export const Roles = (...roles: Role[]) => SetMetadata(ROLES_KEY, roles);
 export const SKIP_APPROVAL_KEY = 'skipApproval';
 export const SkipApproval = () => SetMetadata(SKIP_APPROVAL_KEY, true);
 
+/**
+ * يقبل توكن تسجيل TOTP المحدود إضافةً إلى توكن الجلسة الكامل.
+ * حصراً لمساري إعداد/تفعيل TOTP — أي مسار آخر يرفض التوكن المحدود.
+ */
+export const ALLOW_TOTP_ENROLLMENT_KEY = 'allowTotpEnrollment';
+export const AllowTotpEnrollment = () => SetMetadata(ALLOW_TOTP_ENROLLMENT_KEY, true);
+
 export interface RequestUser {
   id: string;
   role: Role;

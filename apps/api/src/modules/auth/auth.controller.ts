@@ -1,5 +1,4 @@
 import { Body, Controller, Get, HttpCode, Post } from '@nestjs/common';
-import { Throttle } from '@nestjs/throttler';
 import {
   zLogin,
   zRefresh,
@@ -8,6 +7,7 @@ import {
   type RegisterInput,
 } from '@superapp/shared';
 import type { z } from 'zod';
+import { AuthThrottle } from '../../common/auth-throttle';
 import {
   CurrentUser,
   Public,
@@ -28,14 +28,14 @@ export class AuthController {
   ) {}
 
   @Public()
-  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @AuthThrottle()
   @Post('register')
   register(@Body(new ZodValidationPipe(zRegister)) body: RegisterInput) {
     return this.auth.register(body);
   }
 
   @Public()
-  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @AuthThrottle()
   @HttpCode(200)
   @Post('login')
   login(@Body(new ZodValidationPipe(zLogin)) body: LoginInput) {

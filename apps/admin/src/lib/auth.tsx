@@ -10,7 +10,7 @@ import {
 } from 'react';
 import type { AuthTokens, AuthUser } from '@superapp/shared';
 import { api } from './api';
-import { hasTokens, localStorageTokens } from './storage';
+import { enrollmentTokens, hasTokens, localStorageTokens } from './storage';
 
 const USER_KEY = 'sa.admin.user';
 const AUTH_EVENT = 'sa:auth-changed';
@@ -63,40 +63,61 @@ function getServerSnapshot(): AuthUser | null {
   return null;
 }
 
+/** رد الدخول: جلسة كاملة، أو مطالبة بتسجيل جهاز المصادقة قبل أي وصول إداري */
+type AdminLoginResponse =
+  | { status: 'ok'; user: AuthUser; tokens: AuthTokens }
+  | { status: 'totp_enrollment_required'; enrollmentToken: string; email: string };
+
+export type LoginOutcome =
+  | { kind: 'session'; user: AuthUser }
+  | { kind: 'enrollment'; email: string };
+
 export interface UseAuthResult {
   user: AuthUser | null;
-  login: (email: string, password: string, totp?: string) => Promise<AuthUser>;
+  login: (email: string, password: string, totp?: string) => Promise<LoginOutcome>;
+  /** تثبيت الجلسة بعد إتمام تسجيل TOTP */
+  adoptSession: (user: AuthUser, tokens: AuthTokens) => Promise<void>;
   logout: () => Promise<void>;
 }
 
 /**
  * useAuth(): المستخدم الحالي + دخول/خروج.
- * يرمي login خطأ ApiError — code === 'TOTP_REQUIRED' يعني أظهر حقل الرمز.
+ * يرمي login خطأ ApiError — code === 'TOTP_REQUIRED' يعني أظهر حقل الرمز،
+ * ويعيد kind === 'enrollment' حين يلزم تسجيل جهاز المصادقة أولاً.
  */
 export function useAuth(): UseAuthResult {
   const user = useSyncExternalStore(subscribe, readUser, getServerSnapshot);
   const router = useRouter();
 
-  const login = useCallback(
-    async (email: string, password: string, totp?: string) => {
-      const res = await api.post<{ user: AuthUser; tokens: AuthTokens }>(
-        'auth/admin/login',
-        { email, password, ...(totp ? { totp } : {}) },
-      );
-      await localStorageTokens.set(res.tokens);
-      writeUser(res.user);
-      return res.user;
-    },
-    [],
-  );
+  const login = useCallback(async (email: string, password: string, totp?: string) => {
+    const res = await api.post<AdminLoginResponse>('auth/admin/login', {
+      email,
+      password,
+      ...(totp ? { totp } : {}),
+    });
+    if (res.status === 'totp_enrollment_required') {
+      await enrollmentTokens.set({ accessToken: res.enrollmentToken, refreshToken: '' });
+      return { kind: 'enrollment', email: res.email } satisfies LoginOutcome;
+    }
+    await localStorageTokens.set(res.tokens);
+    writeUser(res.user);
+    return { kind: 'session', user: res.user } satisfies LoginOutcome;
+  }, []);
+
+  const adoptSession = useCallback(async (nextUser: AuthUser, tokens: AuthTokens) => {
+    await localStorageTokens.set(tokens);
+    await enrollmentTokens.clear();
+    writeUser(nextUser);
+  }, []);
 
   const logout = useCallback(async () => {
     await localStorageTokens.clear();
+    await enrollmentTokens.clear();
     writeUser(null);
     router.replace('/login');
   }, [router]);
 
-  return { user, login, logout };
+  return { user, login, adoptSession, logout };
 }
 
 /**

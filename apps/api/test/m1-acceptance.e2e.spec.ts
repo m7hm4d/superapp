@@ -4,15 +4,15 @@ import { randomInt, randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module';
+import { loginAdmin } from './helpers/admin-login';
 
 /**
  * قبول M1 (الخطة): طلب يمر بكل الحالات، الانتقالات غير الشرعية مرفوضة،
  * order_events كامل، rotation للتوكنات، idempotency، وحوكمة الموافقات.
- * يتطلب: قاعدة مهاجَرة + seed مُشغَّل بنفس SEED_ADMIN_PASSWORD المتاح هنا.
+ * يتطلب: قاعدة مهاجَرة + seed بنفس SEED_ADMIN_PASSWORD وSEED_ADMIN_TOTP_SECRET.
  */
 
 const ADMIN_PHONE = '+9647700000001';
-const ADMIN_EMAIL = 'admin@superapp.local';
 const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? '';
 const KARRADA = { lat: 33.306, lng: 44.426 };
 
@@ -91,13 +91,8 @@ describe('M1 acceptance', () => {
     customerAccess = login.body.tokens.accessToken;
   });
 
-  it('admin: logs in via /auth/admin/login (email + password)', async () => {
-    expect(ADMIN_PASSWORD, 'SEED_ADMIN_PASSWORD مطلوب لاختبارات الأدمن').toBeTruthy();
-    const res = await request(http)
-      .post('/api/v1/auth/admin/login')
-      .send({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD })
-      .expect(200);
-    adminAccess = res.body.tokens.accessToken;
+  it('admin: logs in via /auth/admin/login (email + password + TOTP)', async () => {
+    adminAccess = await loginAdmin(http);
   });
 
   it('security: phone login rejects admin even with correct password (TOTP bypass closed)', async () => {
