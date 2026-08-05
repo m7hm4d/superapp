@@ -1,0 +1,47 @@
+{
+  "expo": {
+    "name": "سائق سوبر آب",
+    "slug": "superapp-driver",
+    "version": "0.1.0",
+    "scheme": "superapp-driver",
+    "orientation": "portrait",
+    "newArchEnabled": true,
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "bundleIdentifier": "iq.superapp.driver",
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "نستخدم موقعك لعرض الدفعات القريبة ولتتبع التوصيل أثناء العمل"
+      }
+    },
+    "android": {
+      "package": "iq.superapp.driver",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ]
+    },
+    "extra": {
+      "supportsRTL": true
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "نستخدم موقعك لعرض الدفعات القريبة ولتتبع التوصيل أثناء العمل"
+        }
+      ],
+      [
+        "@maplibre/maplibre-react-native"
+      ]
+    ],
+    "experiments": {
+      "tsconfigPaths": false
+    }
+  }
+}
