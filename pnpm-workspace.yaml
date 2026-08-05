@@ -1,0 +1,15 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+overrides:
+  react-native-reanimated: ~4.1.1
+  expo-secure-store: ~15.0.0
+  "@expo/vector-icons": ~15.0.0
+  react-native: 0.81.5
+  react: 19.1.0
+  react-dom: 19.1.0
+allowBuilds:
+  '@swc/core': true
+  argon2: true
+  esbuild: true
+  sharp: true

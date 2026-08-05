@@ -1,0 +1,25 @@
+{
+  "name": "superapp",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@11.9.0",
+  "scripts": {
+    "dev": "turbo run dev",
+    "dev:api": "pnpm --filter @superapp/api dev",
+    "dev:admin": "pnpm --filter @superapp/admin dev",
+    "dev:customer": "pnpm --filter @superapp/customer start",
+    "dev:vendor": "pnpm --filter @superapp/vendor start",
+    "dev:driver": "pnpm --filter @superapp/driver start",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "db:migrate": "pnpm --filter @superapp/api db:migrate",
+    "db:seed": "pnpm --filter @superapp/api db:seed"
+  },
+  "devDependencies": {
+    "prettier": "^3.6.2",
+    "turbo": "^2.5.8",
+    "typescript": "^5.9.2"
+  }
+}

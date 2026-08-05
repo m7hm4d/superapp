@@ -1,0 +1,35 @@
+# Production-parity stack. Local dev on this machine uses Homebrew PostgreSQL 17 + PostGIS
+# (no Docker installed); this file is the deployment target (VPS) and CI database.
+services:
+  db:
+    image: postgis/postgis:17-3.5
+    environment:
+      POSTGRES_USER: superapp
+      POSTGRES_PASSWORD: superapp
+      POSTGRES_DB: superapp
+    ports:
+      - "5432:5432"
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U superapp"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      DATABASE_URL: postgres://superapp:superapp@db:5432/superapp
+    env_file:
+      - .env
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  dbdata:
