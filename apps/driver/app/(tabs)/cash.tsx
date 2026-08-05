@@ -1,4 +1,5 @@
 import { formatDate, t } from '@superapp/i18n';
+import { ScanKind } from '@superapp/shared';
 import type { SettlementView } from '@superapp/shared';
 import {
   AppText,
@@ -9,6 +10,7 @@ import {
   LoadingState,
   MoneyText,
   Screen,
+  PinOrQr,
 } from '@superapp/ui';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import React, { useState } from 'react';
@@ -55,12 +57,19 @@ function SettlementModal({
               <AppText variant="body" className="text-neutral-600">
                 {t('driver', 'settlementPinHint')}
               </AppText>
-              <AppText
-                variant="title"
-                className="mt-3 text-5xl tracking-widest text-brand-700"
-              >
-                {settlement.settlementPin ?? '----'}
-              </AppText>
+              {settlement.settlementPin ? (
+                <PinOrQr
+                  kind={ScanKind.SETTLEMENT}
+                  id={settlement.id}
+                  pin={settlement.settlementPin}
+                  className="mt-3"
+                  labels={{ qr: t('common', 'scanQr'), pin: t('common', 'scanPin') }}
+                />
+              ) : (
+                <AppText variant="title" className="mt-3 text-5xl tracking-widest text-brand-700">
+                  ----
+                </AppText>
+              )}
               <AppText variant="caption" className="mt-4 text-neutral-500">
                 {t('driver', 'settlementWaiting')}
               </AppText>

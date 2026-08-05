@@ -13,6 +13,8 @@ import {
   Screen,
 } from '@superapp/ui';
 import { t } from '@superapp/i18n';
+import { ScanKind } from '@superapp/shared';
+import { ScanPinButton } from '@superapp/ui/scan';
 import { api, apiErrorCode } from '../src/lib/api';
 import type { VendorLedgerResponse } from '../src/lib/types';
 import { ScreenHeader } from '../src/components/screen-header';
@@ -101,6 +103,14 @@ export default function SettlementConfirmScreen() {
             <AppText variant="body" className="text-center">
               {t('vendor', 'settlementPinPrompt')}
             </AppText>
+            <ScanPinButton
+              kind={ScanKind.SETTLEMENT}
+              expectedId={id}
+              onScanned={(pin) => {
+                setPinError(undefined);
+                confirm.mutate(pin);
+              }}
+            />
             <Animated.View style={{ transform: [{ translateX: shake }] }}>
               <PinInput
                 key={pinKey}

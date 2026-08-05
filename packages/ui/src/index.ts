@@ -19,3 +19,4 @@ export { Toggle, type ToggleProps } from './toggle';
 export { PinInput, type PinInputProps } from './pin-input';
 export { MoneyText, type MoneyTextProps } from './money-text';
 export { DirectionalIcon, type DirectionalIconProps } from './directional-icon';
+export { PinOrQr, type PinOrQrProps } from './pin-or-qr';

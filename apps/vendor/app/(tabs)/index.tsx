@@ -12,8 +12,10 @@ import {
   MoneyText,
   Screen,
   StatusBadge,
+  PinOrQr,
 } from '@superapp/ui';
 import { t } from '@superapp/i18n';
+import { ScanKind } from '@superapp/shared';
 import type { OrderStatus, OrderView } from '@superapp/shared';
 import { api } from '../../src/lib/api';
 import { asArray } from '../../src/lib/types';
@@ -87,12 +89,14 @@ function ActiveBatchCard({ batch }: { batch: VendorActiveBatch }) {
       <AppText variant="heading">
         {t('vendor', 'driverOnTheWay', { name: batch.driverName })}
       </AppText>
-      <View className="flex-row items-center justify-between">
-        <AppText variant="caption">{t('vendor', 'pickupPin')}</AppText>
-        <AppText variant="money" className="text-3xl" selectable>
-          {batch.pickupPin}
-        </AppText>
-      </View>
+      <AppText variant="caption">{t('vendor', 'pickupPin')}</AppText>
+      <PinOrQr
+        kind={ScanKind.PICKUP}
+        id={batch.id}
+        pin={batch.pickupPin}
+        size={150}
+        labels={{ qr: t('common', 'scanQr'), pin: t('common', 'scanPin') }}
+      />
       <AppText variant="caption" selectable>
         {batch.orderCodes.join('  ·  ')}
       </AppText>

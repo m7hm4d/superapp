@@ -9,3 +9,4 @@ export * from './schemas/vendors';
 export * from './schemas/driver';
 export * from './schemas/settlements';
 export * from './schemas/admin';
+export * from './scan-payload';
