@@ -301,6 +301,9 @@ importers:
       '@babel/core':
         specifier: ^7.26.0
         version: 7.29.7
+      '@types/node':
+        specifier: ^24.13.3
+        version: 24.13.3
       '@types/react':
         specifier: ~19.1.0
         version: 19.1.17
@@ -404,6 +407,9 @@ importers:
       '@babel/core':
         specifier: ^7.26.0
         version: 7.29.7
+      '@types/node':
+        specifier: ^24.13.3
+        version: 24.13.3
       '@types/react':
         specifier: ~19.1.0
         version: 19.1.17
@@ -504,6 +510,9 @@ importers:
       '@babel/core':
         specifier: ^7.26.0
         version: 7.29.7
+      '@types/node':
+        specifier: ^24.13.3
+        version: 24.13.3
       '@types/react':
         specifier: ~19.1.0
         version: 19.1.17
