@@ -1,7 +1,21 @@
 /**
  * تنسيق الدينار العراقي: أرقام لاتينية بلا كسور — «12,500 د.ع.»
  * (عرف تطبيقات التوصيل العراقية، والفلوس ميتة عملياً)
+ *
+ * بعض المحركات (Hermes على iOS) تتجاهل لاحقة ‎-u-nu-latn وتعيد أرقاماً
+ * هندية — لذلك نحوّل الأرقام للاتينية حتمياً بعد التنسيق.
  */
+const ARABIC_INDIC = '٠١٢٣٤٥٦٧٨٩';
+
+function forceLatinDigits(text: string): string {
+  let out = '';
+  for (const ch of text) {
+    const i = ARABIC_INDIC.indexOf(ch);
+    out += i >= 0 ? String(i) : ch;
+  }
+  return out;
+}
+
 const iqdFormatter = new Intl.NumberFormat('ar-IQ-u-nu-latn', {
   style: 'currency',
   currency: 'IQD',
@@ -9,7 +23,7 @@ const iqdFormatter = new Intl.NumberFormat('ar-IQ-u-nu-latn', {
 });
 
 export function formatIQD(amount: number): string {
-  return iqdFormatter.format(amount);
+  return forceLatinDigits(iqdFormatter.format(amount));
 }
 
 const timeFormatter = new Intl.DateTimeFormat('ar-IQ-u-nu-latn', {
@@ -18,7 +32,7 @@ const timeFormatter = new Intl.DateTimeFormat('ar-IQ-u-nu-latn', {
 });
 
 export function formatTime(date: Date | string): string {
-  return timeFormatter.format(typeof date === 'string' ? new Date(date) : date);
+  return forceLatinDigits(timeFormatter.format(typeof date === 'string' ? new Date(date) : date));
 }
 
 const dateFormatter = new Intl.DateTimeFormat('ar-IQ-u-nu-latn', {
@@ -28,7 +42,7 @@ const dateFormatter = new Intl.DateTimeFormat('ar-IQ-u-nu-latn', {
 });
 
 export function formatDate(date: Date | string): string {
-  return dateFormatter.format(typeof date === 'string' ? new Date(date) : date);
+  return forceLatinDigits(dateFormatter.format(typeof date === 'string' ? new Date(date) : date));
 }
 
 /** إخفاء رقم الهاتف بين الأطراف: +9647701234567 ← 077XX...67 */
