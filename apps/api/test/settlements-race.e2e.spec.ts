@@ -6,8 +6,14 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module';
 import { DB, DbClient } from '../src/db/drizzle.module';
-import { cities, driverProfiles, ledgerEntries, orders, settlements } from '../src/db/schema';
-import { SettlementsService } from '../src/modules/ledger/settlements.service';
+import {
+  adminAuditLog,
+  cities,
+  driverProfiles,
+  ledgerEntries,
+  orders,
+  settlements,
+} from '../src/db/schema';
 
 /**
  * ضمانات آلة 3 ضد ازدواج التسوية (الملف §8.3): لقطة المستحق تُحسب داخل
@@ -210,8 +216,34 @@ describe('settlement doubling guarantees', () => {
       .expect(409);
     expect(again.body.code).toBe('SETTLEMENT_IN_PROGRESS');
 
-    // الأدمن يحسم الاعتراض (المسار غير مكشوف عبر HTTP بعد — نداء مباشر للخدمة)
-    await app.get(SettlementsService).adminResolve(settlementId, adminUserId, 'تم العد يدوياً');
+    // الأدمن يحسم الاعتراض عبر مسار اللوحة
+    const resolved = await request(http)
+      .post(`/api/v1/admin/settlements/${settlementId}/resolve`)
+      .set('Authorization', `Bearer ${adminAccess}`)
+      .send({ reason: 'تم العد يدوياً مع الطرفين' })
+      .expect(201);
+    expect(resolved.body.status).toBe('SETTLED');
+    expect(resolved.body.settlementPin).toBeUndefined(); // الPIN لا يُسرَّب للإدارة
+
+    // الفعل مدقَّق: فاعل + هدف + سبب
+    const [audit] = await db
+      .select()
+      .from(adminAuditLog)
+      .where(
+        and(eq(adminAuditLog.action, 'resolve_settlement'), eq(adminAuditLog.targetId, settlementId)),
+      );
+    expect(audit).toBeTruthy();
+    expect(audit.actorUserId).toBe(adminUserId);
+    expect(audit.reason).toBe('تم العد يدوياً مع الطرفين');
+    expect(JSON.parse(audit.payload ?? '{}').amountIqd).toBe(10_000);
+
+    // حسم ثانٍ لنفس التسوية مرفوض — لا قيود مكررة
+    const twice = await request(http)
+      .post(`/api/v1/admin/settlements/${settlementId}/resolve`)
+      .set('Authorization', `Bearer ${adminAccess}`)
+      .send({ reason: 'محاولة مكررة' })
+      .expect(409);
+    expect(twice.body.code).toBe('ILLEGAL_TRANSITION');
 
     expect(await settlementDebitsCount()).toBe(1);
     expect(await driverCashOnHand()).toBe(2_000); // بقيت أجرة التوصيل فقط
@@ -225,8 +257,42 @@ describe('settlement doubling guarantees', () => {
     expect(empty.body.code).toBe('NOTHING_TO_SETTLE');
   });
 
+  it('rbac: only admins can resolve a disputed settlement', async () => {
+    await seedDeliveredOrder(3_000);
+    const init = await request(http)
+      .post('/api/v1/driver/settlements')
+      .set('Authorization', `Bearer ${driverAccess}`)
+      .send({ vendorId: vendorProfileId })
+      .expect(201);
+    await request(http)
+      .post(`/api/v1/vendor/settlements/${init.body.id}/dispute`)
+      .set('Authorization', `Bearer ${vendorAccess}`)
+      .send({ reason: 'نقص في المبلغ' })
+      .expect(201);
+
+    for (const token of [driverAccess, vendorAccess]) {
+      await request(http)
+        .post(`/api/v1/admin/settlements/${init.body.id}/resolve`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ reason: 'محاولة غير مصرّحة' })
+        .expect(403);
+    }
+    // السبب إلزامي حتى للأدمن — الفعل الإداري بلا مبرر مرفوض
+    await request(http)
+      .post(`/api/v1/admin/settlements/${init.body.id}/resolve`)
+      .set('Authorization', `Bearer ${adminAccess}`)
+      .send({ reason: 'x' })
+      .expect(400);
+
+    await request(http)
+      .post(`/api/v1/admin/settlements/${init.body.id}/resolve`)
+      .set('Authorization', `Bearer ${adminAccess}`)
+      .send({ reason: 'تسوية يدوية بعد المراجعة' })
+      .expect(201);
+  });
+
   it('concurrency: parallel initiations create exactly one settlement', async () => {
-    await seedDeliveredOrder(7_000); // عهدة إضافية: 9,000
+    await seedDeliveredOrder(7_000); // عهدة إضافية: 9,000 (تسويتان سابقتان مُنجزتان)
 
     const responses = await Promise.all(
       Array.from({ length: 4 }, () =>
@@ -259,8 +325,8 @@ describe('settlement doubling guarantees', () => {
       .send({ pin: created[0].body.settlementPin })
       .expect(201);
 
-    expect(await settlementDebitsCount()).toBe(2);
-    expect(await driverCashOnHand()).toBe(4_000); // أجرتا توصيل فقط
+    expect(await settlementDebitsCount()).toBe(3);
+    expect(await driverCashOnHand()).toBe(6_000); // ثلاث أجور توصيل فقط
   });
 
   it('fresh snapshot: a new settlement covers only unsettled orders', async () => {
@@ -281,7 +347,7 @@ describe('settlement doubling guarantees', () => {
       .send({ pin: init.body.settlementPin })
       .expect(201);
 
-    expect(await settlementDebitsCount()).toBe(3);
-    expect(await driverCashOnHand()).toBe(6_000); // ثلاث أجور توصيل
+    expect(await settlementDebitsCount()).toBe(4);
+    expect(await driverCashOnHand()).toBe(8_000); // أربع أجور توصيل
   });
 });

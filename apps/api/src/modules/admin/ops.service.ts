@@ -80,6 +80,9 @@ export const zAdminSettlementsQuery = z
   .merge(zPagination);
 export type AdminSettlementsQuery = z.infer<typeof zAdminSettlementsQuery>;
 
+export const zResolveSettlement = z.object({ reason: z.string().min(2).max(500) });
+export type ResolveSettlementInput = z.infer<typeof zResolveSettlement>;
+
 /**
  * عمليات الإدارة على الدفعات/الاستثناءات/المال (M2):
  * قراءات مباشرة عبر drizzle، انتقالات الطلب عبر OrdersService (آلة 1)،

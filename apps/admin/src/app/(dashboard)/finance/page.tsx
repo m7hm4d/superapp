@@ -96,6 +96,8 @@ const ERROR_AR: Record<string, string> = {
   ALREADY_REVERSED: 'سبق عكس هذا القيد',
   CANNOT_REVERSE_REVERSAL: 'لا يمكن عكس قيد عكسي',
   VALIDATION_ERROR: 'بيانات غير صالحة',
+  SETTLEMENT_NOT_FOUND: 'التسوية غير موجودة',
+  ILLEGAL_TRANSITION: 'لا يمكن حسم هذه التسوية بحالتها الحالية',
 };
 
 function arError(e: unknown): string {
@@ -130,6 +132,7 @@ export default function FinancePage() {
   const [ledgerOrderId, setLedgerOrderId] = useState('');
   const [ledgerOffset, setLedgerOffset] = useState(0);
   const [reverseTarget, setReverseTarget] = useState<LedgerRow | null>(null);
+  const [resolveTarget, setResolveTarget] = useState<SettlementRow | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
 
   const summaryFilters = {
@@ -177,6 +180,17 @@ export default function FinancePage() {
     onSuccess: () => {
       setBanner(null);
       setReverseTarget(null);
+      invalidateAll();
+    },
+    onError: (e) => setBanner(arError(e)),
+  });
+
+  const resolveMutation = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      api.post(`admin/settlements/${id}/resolve`, { reason }),
+    onSuccess: () => {
+      setBanner(null);
+      setResolveTarget(null);
       invalidateAll();
     },
     onError: (e) => setBanner(arError(e)),
@@ -328,7 +342,24 @@ export default function FinancePage() {
                   header: 'الطلبات',
                   render: (row) => String(row.orderIds.length),
                 },
-                { key: 'status', header: 'الحالة', render: (row) => <StatusBadge status={row.status} /> },
+                {
+                  key: 'status',
+                  header: 'الحالة',
+                  render: (row) => (
+                    <div>
+                      <StatusBadge status={row.status} />
+                      {/* المسوّاة تحمل ملاحظة حسم الإدارة — مكانها سجل التدقيق لا القائمة */}
+                      {row.status === 'DISPUTED' && row.disputeReason && (
+                        <span
+                          className="mt-1 block max-w-40 truncate text-xs text-gray-500"
+                          title={row.disputeReason}
+                        >
+                          {row.disputeReason}
+                        </span>
+                      )}
+                    </div>
+                  ),
+                },
                 {
                   key: 'created',
                   header: 'أُنشئت',
@@ -345,6 +376,17 @@ export default function FinancePage() {
                     ) : (
                       '—'
                     ),
+                },
+                {
+                  key: 'actions',
+                  header: '',
+                  render: (row) =>
+                    // المعترَض عليها تحجب أي تسوية جديدة لنفس السائق والمخبز حتى تُحسم
+                    row.status === 'DISPUTED' ? (
+                      <Button size="sm" onClick={() => setResolveTarget(row)}>
+                        حسم الاعتراض
+                      </Button>
+                    ) : null,
                 },
               ]}
             />
@@ -500,6 +542,23 @@ export default function FinancePage() {
         onConfirm={async (reason) => {
           if (!reverseTarget || !reason) return;
           await reverseMutation.mutateAsync({ id: reverseTarget.id, reason });
+        }}
+      />
+
+      <ConfirmDialog
+        open={resolveTarget !== null}
+        onClose={() => setResolveTarget(null)}
+        title="حسم اعتراض التسوية"
+        body={
+          resolveTarget
+            ? `ستُعتبر التسوية مسوّاة بمبلغ ${formatIQD(resolveTarget.amountIqd)} بين ${resolveTarget.driverName} و${resolveTarget.vendorStoreNameAr}، وتُكتب قيود الدفتر فوراً. اعتراض المخبز: «${resolveTarget.disputeReason ?? '—'}». اذكر مبرر الحسم.`
+            : undefined
+        }
+        requireReason
+        confirmLabel="تأكيد الحسم"
+        onConfirm={async (reason) => {
+          if (!resolveTarget || !reason) return;
+          await resolveMutation.mutateAsync({ id: resolveTarget.id, reason });
         }}
       />
     </div>
