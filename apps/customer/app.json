@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "سوبر آب — العميل",
+    "slug": "superapp-customer",
+    "version": "0.1.0",
+    "scheme": "superapp-customer",
+    "orientation": "portrait",
+    "newArchEnabled": true,
+    "userInterfaceStyle": "light",
+    "extra": {
+      "supportsRTL": true
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "نستخدم موقعك لعرض المخابز القريبة وتحديد عنوان التوصيل."
+        }
+      ],
+      [
+        "@maplibre/maplibre-react-native"
+      ]
+    ],
+    "ios": {
+      "bundleIdentifier": "iq.superapp.customer",
+      "supportsTablet": false
+    },
+    "android": {
+      "package": "iq.superapp.customer",
+      "edgeToEdgeEnabled": true
+    },
+    "experiments": {
+      "tsconfigPaths": false
+    }
+  }
+}
