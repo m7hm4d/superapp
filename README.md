@@ -81,6 +81,20 @@ pnpm dev:driver
 pnpm exec expo run:ios
 ```
 
+**قاعدة ذهبية عند تشغيل أكثر من تطبيق معاً**: لا تفتح التطبيق بأيقونته (لوحة dev-client قد تصله بخادم تطبيق آخر فيظهر خطأ `NativeEventEmitter`). استخدم السكربت الذي يوصله بمنفذه الصحيح دائماً:
+
+```bash
+./scripts/sim.sh vendor
+```
+
+```bash
+./scripts/sim.sh customer
+```
+
+```bash
+./scripts/sim.sh driver
+```
+
 ## بيانات الدخول التجريبية (من الـ seed)
 
 - أدمن اللوحة: `admin@superapp.local` / `Admin#12345`
