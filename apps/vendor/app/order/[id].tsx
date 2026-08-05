@@ -23,6 +23,15 @@ import { ConfirmDialog, ReasonDialog } from '../../src/components/dialogs';
 
 const QUICK_PREP = [10, 15, 20, 30] as const;
 
+/** شكل استجابة vendor/batches/active (انظر VendorActiveBatchView في الخادم) */
+interface ActiveBatchRow {
+  id: string;
+  status: string;
+  pickupPin: string;
+  orderCodes: string[];
+  driverName: string;
+}
+
 /** جلب تفاصيل الطلب: orders/:id أولاً، وعند المنع نبحث في طوابير البائع */
 async function fetchOrder(id: string): Promise<OrderView> {
   try {
@@ -55,6 +64,18 @@ export default function OrderDetailScreen() {
     queryFn: () => fetchOrder(id),
     enabled: Boolean(id),
   });
+
+  // دفعة نشطة تشمل هذا الطلب؟ نعرض رمز الاستلام هنا أيضاً — الخباز يفتح
+  // تفاصيل الطلب عند وصول السائق لا قائمة التبويبات (السوكت يبطل المفتاح حياً)
+  const batchesQuery = useQuery({
+    queryKey: ['vendor-batches'],
+    queryFn: () => api.get<unknown>('vendor/batches/active'),
+    refetchInterval: 15_000,
+    enabled: query.data?.status === OrderStatus.READY,
+  });
+  const activeBatch = asArray<ActiveBatchRow>(batchesQuery.data, 'batches').find((b) =>
+    b.orderCodes?.includes(query.data?.code ?? ''),
+  );
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['vendor-orders'] });
@@ -211,12 +232,24 @@ export default function OrderDetailScreen() {
             ) : null}
 
             {order.status === OrderStatus.READY ? (
-              <Card className="gap-2 items-center py-6">
-                <AppText variant="heading">{t('vendor', 'waitingDriver')}</AppText>
-                <AppText variant="caption" className="text-center">
-                  {t('vendor', 'pickupPinHint')}
-                </AppText>
-              </Card>
+              activeBatch ? (
+                <Card className="gap-2 items-center py-6">
+                  <AppText variant="heading" className="text-center">
+                    {t('vendor', 'driverOnTheWay', { name: activeBatch.driverName })}
+                  </AppText>
+                  <AppText variant="caption">{t('vendor', 'pickupPin')}</AppText>
+                  <AppText variant="money" className="text-4xl font-bold tracking-widest">
+                    {activeBatch.pickupPin}
+                  </AppText>
+                </Card>
+              ) : (
+                <Card className="gap-2 items-center py-6">
+                  <AppText variant="heading">{t('vendor', 'waitingDriver')}</AppText>
+                  <AppText variant="caption" className="text-center">
+                    {t('vendor', 'pickupPinHint')}
+                  </AppText>
+                </Card>
+              )
             ) : null}
 
             {order.status === OrderStatus.CANCELLED && order.cancelledReason ? (
