@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, RequestMethod } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { EventEmitterModule } from '@nestjs/event-emitter';
@@ -31,6 +31,9 @@ import { RealtimeModule } from './realtime/realtime.module';
   imports: [
     ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
     LoggerModule.forRoot({
+      // الافتراضي في nestjs-pino هو '*' وقد أزالته path-to-regexp v8 (Express 5)،
+      // فينبّه Nest ويحوّله تلقائياً. نصرّح بالشكل الجديد نفسه لإسكات التحذير بلا تغيير سلوك.
+      forRoutes: [{ path: '{*path}', method: RequestMethod.ALL }],
       pinoHttp: {
         genReqId: (req, res) => {
           const incoming = req.headers[REQUEST_ID_HEADER];
