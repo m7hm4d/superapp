@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    services:
+      db:
+        image: postgis/postgis:17-3.5
+        env:
+          POSTGRES_USER: superapp
+          POSTGRES_PASSWORD: superapp
+          POSTGRES_DB: superapp
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U superapp"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 15
+
+    env:
+      DATABASE_URL: postgres://superapp:superapp@localhost:5432/superapp
+      JWT_ACCESS_SECRET: ci-only-access-secret-0000000000
+      JWT_REFRESH_SECRET: ci-only-refresh-secret-000000000
+      NODE_ENV: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck all workspaces
+        run: pnpm run typecheck
+
+      - name: Migrate database
+        run: pnpm --filter @superapp/api db:migrate
+
+      - name: Seed database
+        run: pnpm --filter @superapp/api db:seed
+
+      - name: API e2e tests
+        run: pnpm --filter @superapp/api test
+
+      - name: Build admin dashboard
+        run: pnpm --filter @superapp/admin build
