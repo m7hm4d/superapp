@@ -118,7 +118,7 @@ export default function ExploreScreen() {
   const openStore = (id: string) => router.push(`/store/${id}`);
 
   return (
-    <Screen scroll={false} padded={false}>
+    <Screen scroll={false} padded={false} safeTop={false}>
       <View className="flex-1">
         {/* أدوات أعلى الشاشة: تبديل خريطة/قائمة + شرائح الفئات المفعّلة */}
         <View className="gap-2 bg-surface px-4 pb-2" style={{ paddingTop: insets.top + 8 }}>
