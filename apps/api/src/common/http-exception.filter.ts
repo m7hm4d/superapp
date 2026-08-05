@@ -27,6 +27,12 @@ export class AllExceptionsFilter implements ExceptionFilter {
     // خطأ غير متوقع: سجّل التفاصيل، أعد رسالة عامة فقط
     // eslint-disable-next-line no-console
     console.error({ err: exception, requestId }, 'unhandled exception');
+    if (process.env.SENTRY_DSN) {
+      // استيراد كسول حتى لا يمس المسار الحرج عند غياب الإعداد
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const Sentry = require('@sentry/node') as typeof import('@sentry/node');
+      Sentry.captureException(exception, { extra: { requestId } });
+    }
     res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
       code: 'INTERNAL_ERROR',
       message: 'خطأ غير متوقع',

@@ -46,8 +46,6 @@
     "app/**/*.tsx",
     "src/**/*.ts",
     "src/**/*.tsx",
-    "expo-env.d.ts",
-    ".expo/types/**/*.ts",
     "nativewind-env.d.ts"
   ]
 }

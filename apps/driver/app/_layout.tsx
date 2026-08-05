@@ -15,6 +15,7 @@ import React, { useEffect } from 'react';
 import { I18nManager } from 'react-native';
 import { SocketProvider, useSocket } from '../src/lib/socket';
 import { useAuthStore } from '../src/stores/auth';
+import { registerPushToken } from '../src/lib/push';
 
 I18nManager.allowRTL(true);
 I18nManager.forceRTL(true);
@@ -28,6 +29,10 @@ const queryClient = new QueryClient({
 /** حارس التوجيه: دخول إلزامي، وقيد المراجعة/الموقوف يحال إلى شاشة التفعيل (D-01) */
 function AuthGate() {
   const status = useAuthStore((s) => s.status);
+
+  React.useEffect(() => {
+    if (status === 'authed') void registerPushToken();
+  }, [status]);
   const user = useAuthStore((s) => s.user);
   const segments = useSegments();
   const router = useRouter();

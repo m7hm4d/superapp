@@ -15,6 +15,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { LoadingState, OfflineBar } from '@superapp/ui';
 import { SocketProvider, useSocketStatus } from '../src/lib/socket';
 import { useAuthStore } from '../src/stores/auth';
+import { registerPushToken } from '../src/lib/push';
 import { useApprovalStore } from '../src/stores/approval';
 import { NewOrderOverlay } from '../src/components/new-order-overlay';
 
@@ -35,6 +36,10 @@ const queryClient = new QueryClient({
 /** بوابة التوجيه: ضيف → دخول؛ محجوب → M-01 التفعيل؛ مصادق → التبويبات */
 function AuthGate({ children }: { children: React.ReactNode }) {
   const status = useAuthStore((s) => s.status);
+
+  React.useEffect(() => {
+    if (status === 'authed') void registerPushToken();
+  }, [status]);
   const hydrate = useAuthStore((s) => s.hydrate);
   const blocked = useApprovalStore((s) => s.blocked);
   const segments = useSegments();

@@ -21,6 +21,7 @@ import { DeliveriesModule } from './modules/deliveries/deliveries.module';
 import { FlagsModule } from './modules/flags/flags.module';
 import { LedgerModule } from './modules/ledger/ledger.module';
 import { OrdersModule } from './modules/orders/orders.module';
+import { PushModule } from './modules/push/push.module';
 import { VendorsModule } from './modules/vendors/vendors.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { RealtimeModule } from './realtime/realtime.module';
@@ -56,6 +57,7 @@ import { RealtimeModule } from './realtime/realtime.module';
     LedgerModule,
     DeliveriesModule,
     FlagsModule,
+    PushModule,
     AdminModule,
   ],
   controllers: [HealthController],

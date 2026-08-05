@@ -16,6 +16,7 @@ import {
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, Pressable, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { formatDistance } from '../../src/lib/format';
 import { useConfigQuery, useNearbyQuery } from '../../src/lib/queries';
 
@@ -53,6 +54,7 @@ function VendorRow({ vendor, onPress }: { vendor: VendorCardView; onPress: () =>
 /** C-02 استكشاف المخابز: خريطة/قائمة + فئات من الأعلام + بطاقة متجر منزلقة */
 export default function ExploreScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const configQuery = useConfigQuery();
   const city = configQuery.data?.city ?? null;
 
@@ -119,7 +121,7 @@ export default function ExploreScreen() {
     <Screen scroll={false} padded={false}>
       <View className="flex-1">
         {/* أدوات أعلى الشاشة: تبديل خريطة/قائمة + شرائح الفئات المفعّلة */}
-        <View className="gap-2 bg-surface px-4 pb-2 pt-2">
+        <View className="gap-2 bg-surface px-4 pb-2" style={{ paddingTop: insets.top + 8 }}>
           <View className="flex-row items-center justify-center rounded-card bg-surface-muted p-1">
             {(['map', 'list'] as const).map((m) => (
               <Pressable
