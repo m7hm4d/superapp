@@ -53,6 +53,56 @@ export const adminCredentials = pgTable('admin_credentials', {
   lastTotpStep: bigint('last_totp_step', { mode: 'number' }),
 });
 
+export const authEventOutcomeEnum = pgEnum('auth_event_outcome', [
+  'success',
+  'invalid_credentials',
+  'unknown_identifier',
+  'totp_required',
+  'totp_invalid',
+  'totp_replayed',
+  'enrollment_required',
+  'enrollment_completed',
+  'blocked',
+  'admin_login_denied', // حساب إداري حاول الدخول من مسار الهاتف
+  'refresh_reuse', // إعادة استخدام refresh token = سرقة مفترضة
+  'logout',
+  'session_revoked',
+]);
+
+export const authEventMethodEnum = pgEnum('auth_event_method', [
+  'phone_password',
+  'admin_password_totp',
+  'refresh',
+  'logout',
+  'admin_action',
+]);
+
+/**
+ * سجل أحداث المصادقة: من دخل ومتى ومن أين وبأي نتيجة.
+ * لا يُخزَّن أي معرّف مُدخَل لم يطابق حساباً قائماً — الحقل الحر قد يحوي
+ * كلمة مرور كُتبت في خانة البريد سهواً؛ يكفي أثر المحاولة وعنوانها.
+ * sessionFamilyId يربط الحدث بسلالة refresh الناتجة عنه، فتُعرف الجلسة وجهازها.
+ */
+export const authEvents = pgTable(
+  'auth_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+    method: authEventMethodEnum('method').notNull(),
+    outcome: authEventOutcomeEnum('outcome').notNull(),
+    sessionFamilyId: uuid('session_family_id'),
+    ip: text('ip'),
+    userAgent: text('user_agent'),
+    requestId: text('request_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('auth_events_user_idx').on(t.userId, t.createdAt),
+    index('auth_events_created_idx').on(t.createdAt),
+    index('auth_events_family_idx').on(t.sessionFamilyId),
+  ],
+);
+
 export const customerAddresses = pgTable(
   'customer_addresses',
   {

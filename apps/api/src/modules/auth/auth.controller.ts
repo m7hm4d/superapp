@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post, Req } from '@nestjs/common';
 import {
   zLogin,
   zRefresh,
@@ -7,6 +7,7 @@ import {
   type RegisterInput,
 } from '@superapp/shared';
 import type { z } from 'zod';
+import { authContextFrom } from '../../common/auth-context';
 import { AuthThrottle } from '../../common/auth-throttle';
 import {
   CurrentUser,
@@ -38,8 +39,8 @@ export class AuthController {
   @AuthThrottle()
   @HttpCode(200)
   @Post('login')
-  login(@Body(new ZodValidationPipe(zLogin)) body: LoginInput) {
-    return this.auth.login(body);
+  login(@Body(new ZodValidationPipe(zLogin)) body: LoginInput, @Req() req: object) {
+    return this.auth.login(body, authContextFrom(req));
   }
 
   @Public()
@@ -55,8 +56,9 @@ export class AuthController {
   logout(
     @CurrentUser() user: RequestUser,
     @Body(new ZodValidationPipe(zRefresh)) body: RefreshInput,
+    @Req() req: object,
   ) {
-    return this.tokens.logout(user.id, body.refreshToken);
+    return this.tokens.logout(user.id, body.refreshToken, authContextFrom(req));
   }
 
   @SkipApproval()

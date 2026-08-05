@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AuthModule } from '../auth/auth.module';
 import { FlagsModule } from '../flags/flags.module';
 import { LedgerModule } from '../ledger/ledger.module';
 import { OrdersModule } from '../orders/orders.module';
@@ -8,13 +9,14 @@ import { AdminConfigController } from './admin-config.controller';
 import { AdminExceptionsController } from './admin-exceptions.controller';
 import { AdminFinanceController } from './admin-finance.controller';
 import { AdminOrdersController } from './admin-orders.controller';
+import { AdminSecurityController } from './admin-security.controller';
 import { AdminUsersController } from './admin-users.controller';
 import { AdminService } from './admin.service';
 import { AuditService } from './audit.service';
 import { OpsService } from './ops.service';
 
 @Module({
-  imports: [OrdersModule, FlagsModule, LedgerModule],
+  imports: [OrdersModule, FlagsModule, LedgerModule, AuthModule],
   controllers: [
     AdminApprovalsController,
     AdminOrdersController,
@@ -23,6 +25,7 @@ import { OpsService } from './ops.service';
     AdminFinanceController,
     AdminUsersController,
     AdminConfigController,
+    AdminSecurityController,
   ],
   providers: [AdminService, AuditService, OpsService],
   exports: [AuditService],

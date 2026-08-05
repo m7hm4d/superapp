@@ -1,6 +1,7 @@
-import { Body, Controller, Get, HttpCode, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post, Req } from '@nestjs/common';
 import { Role, zAdminLogin } from '@superapp/shared';
 import { z } from 'zod';
+import { authContextFrom } from '../../common/auth-context';
 import { AuthThrottle } from '../../common/auth-throttle';
 import {
   AllowTotpEnrollment,
@@ -28,8 +29,8 @@ export class AdminAuthController {
   @AuthThrottle()
   @HttpCode(200)
   @Post('login')
-  login(@Body(new ZodValidationPipe(zAdminLogin)) body: AdminLoginInput) {
-    return this.adminAuth.login(body);
+  login(@Body(new ZodValidationPipe(zAdminLogin)) body: AdminLoginInput, @Req() req: object) {
+    return this.adminAuth.login(body, authContextFrom(req));
   }
 
   @Roles(Role.ADMIN)
@@ -48,8 +49,9 @@ export class AdminAuthController {
   enableTotp(
     @CurrentUser() user: RequestUser,
     @Body(new ZodValidationPipe(zTotpToken)) body: TotpTokenInput,
+    @Req() req: object,
   ) {
-    return this.adminAuth.enableTotp(user.id, body.totp);
+    return this.adminAuth.enableTotp(user.id, body.totp, authContextFrom(req));
   }
 
   @Roles(Role.ADMIN)

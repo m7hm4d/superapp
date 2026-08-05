@@ -11,6 +11,7 @@ import * as argon2 from 'argon2';
 import { and, eq, isNull, lt, or } from 'drizzle-orm';
 import { DB, DbClient } from '../../db/drizzle.module';
 import { adminCredentials, users } from '../../db/schema';
+import { AuthEventsService, type AuthContext } from './auth-events.service';
 import { TokenService } from './token.service';
 import { totp, verifyTotpStep } from './totp';
 
@@ -49,13 +50,18 @@ export class AdminAuthService {
     private readonly tokens: TokenService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
+    private readonly events: AuthEventsService,
   ) {}
 
-  async login(input: {
-    email: string;
-    password: string;
-    totp?: string;
-  }): Promise<AdminLoginResult> {
+  async login(
+    input: {
+      email: string;
+      password: string;
+      totp?: string;
+    },
+    ctx: AuthContext = {},
+  ): Promise<AdminLoginResult> {
+    const event = { ...ctx, method: 'admin_password_totp' as const };
     const [row] = await this.db
       .select({ cred: adminCredentials, user: users })
       .from(adminCredentials)
@@ -64,18 +70,22 @@ export class AdminAuthService {
       .limit(1);
 
     if (!row || row.user.role !== Role.ADMIN) {
+      await this.events.record({ ...event, outcome: 'unknown_identifier' });
       throw new UnauthorizedException({ code: 'INVALID_CREDENTIALS' });
     }
     if (row.user.status === UserStatus.BLOCKED) {
+      await this.events.record({ ...event, userId: row.user.id, outcome: 'blocked' });
       throw new ForbiddenException({ code: 'BLOCKED' });
     }
     const ok = await argon2.verify(row.user.passwordHash, input.password);
     if (!ok) {
+      await this.events.record({ ...event, userId: row.user.id, outcome: 'invalid_credentials' });
       throw new UnauthorizedException({ code: 'INVALID_CREDENTIALS' });
     }
 
     // TOTP إلزامي — لا جلسة إدارية بعامل واحد
     if (!row.cred.totpEnabled || !row.cred.totpSecret) {
+      await this.events.record({ ...event, userId: row.user.id, outcome: 'enrollment_required' });
       return {
         status: 'totp_enrollment_required',
         enrollmentToken: await this.issueEnrollmentToken(row.user.id),
@@ -85,11 +95,18 @@ export class AdminAuthService {
     }
 
     if (!input.totp) {
+      await this.events.record({ ...event, userId: row.user.id, outcome: 'totp_required' });
       throw new UnauthorizedException({ code: 'TOTP_REQUIRED' });
     }
-    await this.consumeTotp(row.user.id, row.cred.totpSecret, input.totp);
+    await this.consumeTotp(row.user.id, row.cred.totpSecret, input.totp, event);
 
-    const tokens = await this.tokens.issuePair(row.user);
+    const tokens = await this.tokens.issuePairWithFamily(row.user);
+    await this.events.record({
+      ...event,
+      userId: row.user.id,
+      outcome: 'success',
+      sessionFamilyId: tokens.familyId,
+    });
     return {
       status: 'ok',
       user: {
@@ -126,7 +143,7 @@ export class AdminAuthService {
   }
 
   /** تفعيل TOTP بعد التحقق من أول رمز — يترقّى السر المعلّق إلى فعّال وتُصدر جلسة كاملة */
-  async enableTotp(userId: string, token: string): Promise<AdminSession> {
+  async enableTotp(userId: string, token: string, ctx: AuthContext = {}): Promise<AdminSession> {
     const [cred] = await this.db
       .select()
       .from(adminCredentials)
@@ -154,7 +171,14 @@ export class AdminAuthService {
     if (!user || user.role !== Role.ADMIN) {
       throw new ForbiddenException({ code: 'NO_ADMIN_CREDENTIALS' });
     }
-    const tokens = await this.tokens.issuePair(user);
+    const tokens = await this.tokens.issuePairWithFamily(user);
+    await this.events.record({
+      ...ctx,
+      method: 'admin_password_totp',
+      userId: user.id,
+      outcome: 'enrollment_completed',
+      sessionFamilyId: tokens.familyId,
+    });
     return {
       status: 'ok',
       user: {
@@ -195,9 +219,15 @@ export class AdminAuthService {
    * يتحقق من الرمز ويستهلكه: التحديث المشروط على last_totp_step هو القفل —
    * محاولتان بالرمز نفسه (إعادة استخدام أو سباق) تنجح إحداهما فقط.
    */
-  private async consumeTotp(userId: string, secret: string, token: string): Promise<void> {
+  private async consumeTotp(
+    userId: string,
+    secret: string,
+    token: string,
+    event: AuthContext & { method: 'admin_password_totp' },
+  ): Promise<void> {
     const step = verifyTotpStep(token, secret);
     if (step === null) {
+      await this.events.record({ ...event, userId, outcome: 'totp_invalid' });
       throw new UnauthorizedException({ code: 'TOTP_INVALID' });
     }
     const consumed = await this.db
@@ -212,6 +242,7 @@ export class AdminAuthService {
       .returning({ userId: adminCredentials.userId });
     if (consumed.length === 0) {
       // رمز صحيح لكنه مستعمل سلفاً — إعادة تشغيل مسروقة أو ضغطتان
+      await this.events.record({ ...event, userId, outcome: 'totp_replayed' });
       throw new UnauthorizedException({ code: 'TOTP_ALREADY_USED' });
     }
   }
