@@ -61,6 +61,8 @@ pnpm dev:admin
 
 لوحة الإدارة: `http://localhost:3001` — الباكند: `http://localhost:3000/api/v1`
 
+> ‏`tsconfig` الخاص بالـAPI يضم `packages/shared/src` (تُستهلك كمصدر TS)، فجذر الإخراج المستنتج هو جذر المستودع ويصبح الناتج `dist/apps/api/src/main.js` لا `dist/main.js`. لذلك يصرّح `nest-cli.json` بـ`entryFile` بمساره الفعلي — وهو المسار نفسه في `start:prod` وفي `Dockerfile`. حذفه يكسر `pnpm dev:api` بخطأ `Cannot find module '.../dist/main'`.
+
 التطبيقات (كل تطبيق بمنفذ Metro خاص):
 
 ```bash

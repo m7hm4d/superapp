@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/schema",
   "collection": "@nestjs/schematics",
   "sourceRoot": "src",
+  "entryFile": "apps/api/src/main",
   "compilerOptions": {
     "deleteOutDir": true,
     "tsConfigPath": "tsconfig.json"
