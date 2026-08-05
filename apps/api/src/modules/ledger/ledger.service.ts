@@ -14,6 +14,9 @@ import { driverProfiles, ledgerEntries, orders, settlements, users, vendorProfil
 /** نوع معاملة Drizzle — مطابق بنيوياً لنوع orders.service (استخراج من DbClient نفسه) */
 export type DbTx = Parameters<Parameters<DbClient['transaction']>[0]>[0];
 
+/** قارئ/كاتب: الاتصال العام أو معاملة جارية — للحسابات التي يجب أن تجري داخل قفل المستدعي */
+export type DbExecutor = DbClient | DbTx;
+
 export type LedgerEntryRow = typeof ledgerEntries.$inferSelect;
 
 export interface RecordDeliveryEntriesArgs {
@@ -145,9 +148,13 @@ export class LedgerService {
   /**
    * ما بذمة السائق لكل مخبز: مجاميع subtotal للطلبات المسلّمة غير المسوّاة.
    * الطلب يُستبعد إذا ظهر معرفه في order_ids لتسوية SETTLED لهذا السائق.
+   * مرّر معاملة القفل عند استخدام الناتج للكتابة — لقطة خارج القفل قد تعيد طلبات سُوّيت في الأثناء.
    */
-  async driverOwedByVendor(driverId: string): Promise<DriverOwedByVendorRow[]> {
-    const rows = await this.db
+  async driverOwedByVendor(
+    driverId: string,
+    executor: DbExecutor = this.db,
+  ): Promise<DriverOwedByVendorRow[]> {
+    const rows = await executor
       .select({
         orderId: orders.id,
         vendorId: orders.vendorId,
@@ -164,7 +171,7 @@ export class LedgerService {
         ),
       );
 
-    const settledOrderIds = await this.settledOrderIdsFor({ driverId });
+    const settledOrderIds = await this.settledOrderIdsFor({ driverId }, executor);
 
     const byVendor = new Map<string, DriverOwedByVendorRow>();
     const seenOrders = new Set<string>();
@@ -368,14 +375,17 @@ export class LedgerService {
   // ─────────────────────────────── مساعدات داخلية ───────────────────────────────
 
   /** معرفات الطلبات المشمولة بتسويات SETTLED لطرفٍ ما (مسح order_ids JSON) */
-  private async settledOrderIdsFor(scope: {
-    driverId?: string;
-    vendorId?: string;
-  }): Promise<Set<string>> {
+  private async settledOrderIdsFor(
+    scope: {
+      driverId?: string;
+      vendorId?: string;
+    },
+    executor: DbExecutor = this.db,
+  ): Promise<Set<string>> {
     const conditions = [eq(settlements.status, SettlementStatus.SETTLED)];
     if (scope.driverId !== undefined) conditions.push(eq(settlements.driverId, scope.driverId));
     if (scope.vendorId !== undefined) conditions.push(eq(settlements.vendorId, scope.vendorId));
-    const rows = await this.db
+    const rows = await executor
       .select({ orderIds: settlements.orderIds })
       .from(settlements)
       .where(and(...conditions));

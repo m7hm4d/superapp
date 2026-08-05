@@ -77,13 +77,6 @@ export class SettlementsService {
       throw new NotFoundException({ code: 'VENDOR_NOT_FOUND' });
     }
 
-    // المستحق الحالي لهذا المخبز (المسوّى SETTLED مستبعد داخل الحساب)
-    const owed = await this.ledger.driverOwedByVendor(driver.id);
-    const outstanding = owed.find((o) => o.vendorId === vendorId);
-    if (!outstanding || outstanding.amountIqd <= 0) {
-      throw new ConflictException({ code: 'NOTHING_TO_SETTLE' });
-    }
-
     const created = await this.db.transaction(async (tx) => {
       // قفل صف السائق يسلسل بدء التسويات ويمنع سباق إنشاء مزدوج لنفس الثنائي
       await tx.execute(sql`SELECT id FROM driver_profiles WHERE id = ${driver.id} FOR UPDATE`);
@@ -97,12 +90,24 @@ export class SettlementsService {
             inArray(settlements.status, [
               SettlementStatus.UNSETTLED,
               SettlementStatus.AWAITING_CONFIRMATION,
+              // المعترَض عليها قد تصير SETTLED بقرار الإدارة لاحقاً — تحجب البدء
+              // كي لا تُدرج طلباتها في تسوية ثانية فيُخصم النقد مرتين
+              SettlementStatus.DISPUTED,
             ]),
           ),
         )
         .limit(1);
       if (inProgress) {
         throw new ConflictException({ code: 'SETTLEMENT_IN_PROGRESS' });
+      }
+
+      // اللقطة (المبلغ + الطلبات) تُحسب هنا حصراً — بعد القفل وداخل المعاملة.
+      // لقطة قبل القفل قد تُدرج طلبات سُوّيت في الأثناء فتُسوّى مرتين
+      // ويُخصم من عهدة السائق مرتين (المسوّى SETTLED مستبعد داخل الحساب).
+      const owed = await this.ledger.driverOwedByVendor(driver.id, tx);
+      const outstanding = owed.find((o) => o.vendorId === vendorId);
+      if (!outstanding || outstanding.amountIqd <= 0) {
+        throw new ConflictException({ code: 'NOTHING_TO_SETTLE' });
       }
 
       // البدء هو فعل السائق نفسه — ننشئ مباشرةً بحالة AWAITING_CONFIRMATION
