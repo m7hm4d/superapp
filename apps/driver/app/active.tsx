@@ -1,5 +1,6 @@
 import { formatIQD, formatTime, t } from '@superapp/i18n';
 import { MapView } from '@superapp/map';
+import { ScanKind } from '@superapp/shared';
 import type { OrderStatus } from '@superapp/shared';
 import {
   AppText,
@@ -14,6 +15,7 @@ import {
   StatusBadge,
   cn,
 } from '@superapp/ui';
+import { ScanPinButton } from '@superapp/ui/scan';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Redirect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -131,6 +133,12 @@ function PickupPhase({
           <AppText variant="heading" className="mb-3">
             {t('driver', 'enterPickupPin')}
           </AppText>
+          <ScanPinButton
+            kind={ScanKind.PICKUP}
+            expectedId={batch.id}
+            onScanned={(pin) => confirmMutation.mutate(pin)}
+            className="mb-4"
+          />
           <PinInput key={pinKey} length={4} onFilled={(pin) => confirmMutation.mutate(pin)} />
           {confirmMutation.isPending ? <LoadingState /> : null}
           {error ? (
@@ -210,6 +218,12 @@ function DeliverySheet({
               <AppText variant="heading" className="mb-3">
                 {t('driver', 'enterDeliveryPin')}
               </AppText>
+              <ScanPinButton
+                kind={ScanKind.DELIVERY}
+                expectedId={stop.orderId}
+                onScanned={(pin) => deliverMutation.mutate(pin)}
+                className="mb-4"
+              />
               <PinInput key={pinKey} length={4} onFilled={(pin) => deliverMutation.mutate(pin)} />
               {deliverMutation.isPending ? <LoadingState /> : null}
               {error ? (

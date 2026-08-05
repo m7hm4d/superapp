@@ -13,9 +13,10 @@ import {
   MoneyText,
   Screen,
   StatusBadge,
+  PinOrQr,
 } from '@superapp/ui';
 import { t } from '@superapp/i18n';
-import { OrderStatus, type OrderView } from '@superapp/shared';
+import { OrderStatus, ScanKind, type OrderView } from '@superapp/shared';
 import { api, apiErrorCode, apiErrorStatus } from '../../src/lib/api';
 import { asArray } from '../../src/lib/types';
 import { ScreenHeader } from '../../src/components/screen-header';
@@ -238,9 +239,12 @@ export default function OrderDetailScreen() {
                     {t('vendor', 'driverOnTheWay', { name: activeBatch.driverName })}
                   </AppText>
                   <AppText variant="caption">{t('vendor', 'pickupPin')}</AppText>
-                  <AppText variant="money" className="text-4xl font-bold tracking-widest">
-                    {activeBatch.pickupPin}
-                  </AppText>
+                  <PinOrQr
+                    kind={ScanKind.PICKUP}
+                    id={activeBatch.id}
+                    pin={activeBatch.pickupPin}
+                    labels={{ qr: t('common', 'scanQr'), pin: t('common', 'scanPin') }}
+                  />
                 </Card>
               ) : (
                 <Card className="gap-2 items-center py-6">

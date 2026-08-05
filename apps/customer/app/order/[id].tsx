@@ -1,6 +1,6 @@
 import { formatTime, t } from '@superapp/i18n';
 import type { OrderView } from '@superapp/shared';
-import { OrderStatus } from '@superapp/shared';
+import { OrderStatus, ScanKind } from '@superapp/shared';
 import {
   AppText,
   Button,
@@ -12,6 +12,7 @@ import {
   Screen,
   StatusBadge,
   cn,
+  PinOrQr,
 } from '@superapp/ui';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams } from 'expo-router';
@@ -206,10 +207,16 @@ export default function OrderScreen() {
               <AppText variant="heading" className="text-brand-700">
                 {t('order', 'deliveryPin')}
               </AppText>
-              <AppText variant="title" className="my-1 text-4xl tracking-widest text-brand-700">
-                {order.deliveryPin}
+              <PinOrQr
+                kind={ScanKind.DELIVERY}
+                id={order.id}
+                pin={order.deliveryPin}
+                className="my-1"
+                labels={{ qr: t('common', 'scanQr'), pin: t('common', 'scanPin') }}
+              />
+              <AppText variant="caption" className="mt-2">
+                {t('order', 'deliveryPinHint')}
               </AppText>
-              <AppText variant="caption">{t('order', 'deliveryPinHint')}</AppText>
             </Card>
           ) : null}
 
