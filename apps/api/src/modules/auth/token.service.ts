@@ -11,6 +11,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
 import { DB, DbClient } from '../../db/drizzle.module';
 import { refreshTokens, users } from '../../db/schema';
+import { AuthEventsService, type AuthContext } from './auth-events.service';
 
 type UserRow = typeof users.$inferSelect;
 type Tx = Parameters<Parameters<DbClient['transaction']>[0]>[0];
@@ -58,12 +59,20 @@ export class TokenService {
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     @Inject(DB) private readonly db: DbClient,
+    private readonly events: AuthEventsService,
   ) {}
 
   /** زوج جديد بسلالة (family) جديدة — عند التسجيل أو الدخول */
   async issuePair(user: UserRow): Promise<AuthTokens> {
-    const pair = await this.createPair(user, randomUUID(), this.db);
+    const pair = await this.issuePairWithFamily(user);
     return { accessToken: pair.accessToken, refreshToken: pair.refreshToken };
+  }
+
+  /** مثل issuePair لكن يكشف معرّف السلالة — يربط سجل المصادقة بالجلسة الناتجة */
+  async issuePairWithFamily(user: UserRow): Promise<AuthTokens & { familyId: string }> {
+    const familyId = randomUUID();
+    const pair = await this.createPair(user, familyId, this.db);
+    return { accessToken: pair.accessToken, refreshToken: pair.refreshToken, familyId };
   }
 
   /**
@@ -89,6 +98,12 @@ export class TokenService {
     if (!row || row.revokedAt) {
       const familyId = row?.familyId ?? payload.fid;
       if (familyId) await this.revokeFamily(familyId);
+      await this.events.record({
+        userId: row?.userId ?? payload.sub ?? null,
+        method: 'refresh',
+        outcome: 'refresh_reuse',
+        sessionFamilyId: familyId ?? null,
+      });
       throw new UnauthorizedException({ code: 'REFRESH_REUSE' });
     }
 
@@ -130,7 +145,11 @@ export class TokenService {
   }
 
   /** خروج: إبطال سلالة الرمز المقدَّم إن كان يخص المستخدم نفسه — عملية idempotent */
-  async logout(userId: string, refreshToken: string): Promise<{ ok: true }> {
+  async logout(
+    userId: string,
+    refreshToken: string,
+    ctx: AuthContext = {},
+  ): Promise<{ ok: true }> {
     const [row] = await this.db
       .select({ familyId: refreshTokens.familyId, userId: refreshTokens.userId })
       .from(refreshTokens)
@@ -138,6 +157,13 @@ export class TokenService {
       .limit(1);
     if (row && row.userId === userId) {
       await this.revokeFamily(row.familyId);
+      await this.events.record({
+        ...ctx,
+        userId,
+        method: 'logout',
+        outcome: 'logout',
+        sessionFamilyId: row.familyId,
+      });
     }
     return { ok: true };
   }

@@ -19,6 +19,7 @@ import { argon2id, hash, verify } from 'argon2';
 import { asc, eq } from 'drizzle-orm';
 import { DB, DbClient } from '../../db/drizzle.module';
 import { cities, driverProfiles, users, vendorProfiles } from '../../db/schema';
+import { AuthEventsService, type AuthContext } from './auth-events.service';
 import { TokenService } from './token.service';
 
 type UserRow = typeof users.$inferSelect;
@@ -36,6 +37,7 @@ export class AuthService {
   constructor(
     @Inject(DB) private readonly db: DbClient,
     private readonly tokens: TokenService,
+    private readonly events: AuthEventsService,
   ) {}
 
   async register(input: RegisterInput): Promise<{ user: AuthUser; tokens: AuthTokens }> {
@@ -120,13 +122,19 @@ export class AuthService {
     return { user: this.toAuthUser(user, approvalStatus), tokens };
   }
 
-  async login(input: LoginInput): Promise<{ user: AuthUser; tokens: AuthTokens }> {
+  async login(
+    input: LoginInput,
+    ctx: AuthContext = {},
+  ): Promise<{ user: AuthUser; tokens: AuthTokens }> {
+    const event = { ...ctx, method: 'phone_password' as const };
     const [user] = await this.db
       .select()
       .from(users)
       .where(eq(users.phone, input.phone))
       .limit(1);
     if (!user) {
+      // لا نخزّن الرقم المُدخَل: قد يكون خطأ كتابة، ويكفي أثر المحاولة وعنوانها
+      await this.events.record({ ...event, outcome: 'unknown_identifier' });
       throw new UnauthorizedException({
         code: 'INVALID_CREDENTIALS',
         message: 'رقم الهاتف أو كلمة المرور غير صحيحة',
@@ -135,6 +143,7 @@ export class AuthService {
 
     const valid = await verify(user.passwordHash, input.password);
     if (!valid) {
+      await this.events.record({ ...event, userId: user.id, outcome: 'invalid_credentials' });
       throw new UnauthorizedException({
         code: 'INVALID_CREDENTIALS',
         message: 'رقم الهاتف أو كلمة المرور غير صحيحة',
@@ -145,6 +154,7 @@ export class AuthService {
     // /auth/admin/login (بريد + كلمة مرور + TOTP). الرد مطابق لخطأ الاعتماديات
     // كي لا يكشف أن الرقم يعود لحساب إداري.
     if (user.role === Role.ADMIN) {
+      await this.events.record({ ...event, userId: user.id, outcome: 'admin_login_denied' });
       throw new UnauthorizedException({
         code: 'INVALID_CREDENTIALS',
         message: 'رقم الهاتف أو كلمة المرور غير صحيحة',
@@ -152,11 +162,18 @@ export class AuthService {
     }
 
     if (user.status === UserStatus.BLOCKED) {
+      await this.events.record({ ...event, userId: user.id, outcome: 'blocked' });
       throw new ForbiddenException({ code: 'BLOCKED', message: 'الحساب محظور' });
     }
 
     const approvalStatus = await this.approvalStatusFor(user.id, user.role);
-    const tokens = await this.tokens.issuePair(user);
+    const tokens = await this.tokens.issuePairWithFamily(user);
+    await this.events.record({
+      ...event,
+      userId: user.id,
+      outcome: 'success',
+      sessionFamilyId: tokens.familyId,
+    });
     return { user: this.toAuthUser(user, approvalStatus), tokens };
   }
 

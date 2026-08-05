@@ -6,6 +6,7 @@ import {
   LogOut,
   Package,
   Settings,
+  ShieldCheck,
   Truck,
   UserCheck,
   Users,
@@ -23,6 +24,7 @@ const NAV_LINKS: SidebarNavLink[] = [
   { href: '/users', label: 'المستخدمون', icon: Users },
   { href: '/exceptions', label: 'الاستثناءات', icon: AlertTriangle },
   { href: '/finance', label: 'النقد والتسويات', icon: Wallet },
+  { href: '/security', label: 'الدخول والجلسات', icon: ShieldCheck },
   { href: '/settings', label: 'الإعدادات', icon: Settings },
 ];
 
