@@ -189,7 +189,7 @@ sudo install -m 755 cosign /usr/local/bin/cosign && rm cosign
 ينشئ حساب الأدمن والمدينة والأدوار:
 
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env.prod run --rm api \
+./deploy/compose.sh run --rm api \
   node -r ./dist/apps/api/src/register-paths.js dist/apps/api/src/db/seed/seed.js
 ```
 
@@ -262,6 +262,22 @@ cp .env.stage.example .env.stage && chmod 600 .env.stage
 ./deploy/deploy.sh                     # الإنتاج
 ```
 
+### أوامر يدوية على أي من البيئتين
+
+**استعمل `deploy/compose.sh` لا `docker compose` مباشرة.** ‏compose يقرأ
+المتغيرات من مصدرين: `--env-file` للاستيفاء، و`env_file:` داخل الخدمة من
+`ENV_FILE`. أمرٌ يدوي ينسى الثاني يقع على `.env.prod` — فيُنشئ `run --rm api`
+على حزمة التجربة حاويةً **ببيئة الإنتاج**. الغلاف يضبط الاثنين معاً.
+
+```bash
+./deploy/compose.sh --env .env.stage logs -f api
+```
+
+```bash
+./deploy/compose.sh --env .env.stage run --rm api \
+  node -r ./dist/apps/api/src/register-paths.js dist/apps/api/src/db/seed/seed.js
+```
+
 ### فحص ما نُشر
 
 ```bash
@@ -292,11 +308,11 @@ EXPO_PUBLIC_API_URL=https://api-stage.4irq.com pnpm dev:driver
 ### التشغيل اليومي
 
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env.prod logs -f api
+./deploy/compose.sh logs -f api
 ```
 
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T db \
+./deploy/compose.sh exec -T db \
   pg_dump -U superapp superapp | gzip > backup-$(date +%F).sql.gz
 ```
 
