@@ -3,9 +3,15 @@
 #   • الهجرات تُطبَّق في خدمة لمرة واحدة قبل إقلاع الـAPI، لا يدوياً.
 #   • ‏restart: unless-stopped على كل خدمة دائمة — تعود بعد إعادة تشغيل الخادم.
 #
-#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+#   ./deploy/deploy.sh                    ← الإنتاج
+#   ./deploy/deploy.sh --env .env.stage    ← بيئة التجربة
+#
+# الصور تُسحب من GHCR ولا تُبنى هنا: البناء يحدث في CI مرة واحدة، والناتج
+# موقَّع. البناء محلياً للتطوير عبر docker-compose.build.yml.
 
-name: superapp
+# ‏STACK_NAME يفصل بيئتين على خادم واحد: أسماء الحاويات والأحجام والشبكة
+# الداخلية كلها مشتقّة منه، فقاعدة التجربة لا تلمس قاعدة الإنتاج أبداً.
+name: superapp-${STACK_NAME:?STACK_NAME مطلوب (prod أو stage)}
 
 services:
   db:
@@ -29,63 +35,54 @@ services:
   # تطبّق الهجرات ثم تخرج. الـAPI لا يقلع قبل نجاحها، فلا تعمل نسخة
   # جديدة على مخطط قديم.
   migrate:
-    build:
-      context: .
-      dockerfile: apps/api/Dockerfile
-    image: superapp-api:latest
+    image: ${API_IMAGE:?API_IMAGE مطلوب}
     restart: 'no'
-    env_file: [.env.prod]
+    # بلا قيمة افتراضية عمداً. القيمة الافتراضية هنا كانت الخلل نفسه: أمرٌ
+    # يستهدف التجربة وينسى ENV_FILE كان **ينجح** ويسلّم الحاوية بيئة الإنتاج،
+    # فتُسمّى superapp-stage-api وتحمل رابط قاعدة الإنتاج وأسرارها. الخطأ
+    # الصامت أخطر من الخطأ الصاخب — فليصرخ.
+    env_file: ['${ENV_FILE:?ENV_FILE مطلوب — استعمل deploy/compose.sh أو deploy/deploy.sh}']
     depends_on:
       db:
         condition: service_healthy
     command: ['node', 'dist/apps/api/src/db/migrate.js']
 
   api:
-    build:
-      context: .
-      dockerfile: apps/api/Dockerfile
-    image: superapp-api:latest
+    image: ${API_IMAGE:?API_IMAGE مطلوب}
     restart: unless-stopped
-    env_file: [.env.prod]
+    # بلا قيمة افتراضية عمداً. القيمة الافتراضية هنا كانت الخلل نفسه: أمرٌ
+    # يستهدف التجربة وينسى ENV_FILE كان **ينجح** ويسلّم الحاوية بيئة الإنتاج،
+    # فتُسمّى superapp-stage-api وتحمل رابط قاعدة الإنتاج وأسرارها. الخطأ
+    # الصامت أخطر من الخطأ الصاخب — فليصرخ.
+    env_file: ['${ENV_FILE:?ENV_FILE مطلوب — استعمل deploy/compose.sh أو deploy/deploy.sh}']
     depends_on:
       db:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
     expose: ['3000']
+    networks:
+      default: {}
+      # الاسم الذي يعرفه Caddy المشترك. لا يمكن استعمال اسم الخدمة لأن
+      # الحزمتين تحملان الأسماء نفسها على شبكتيهما الداخليتين.
+      edge:
+        aliases: ['${STACK_NAME}-api']
 
   admin:
-    build:
-      context: .
-      dockerfile: apps/admin/Dockerfile
-      args:
-        # يُخبَز في حزمة المتصفح — تغييره يستلزم --build لا restart
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL مطلوب}
-    image: superapp-admin:latest
+    image: ${ADMIN_IMAGE:?ADMIN_IMAGE مطلوب}
     restart: unless-stopped
     depends_on: [api]
     expose: ['3001']
+    networks:
+      default: {}
+      edge:
+        aliases: ['${STACK_NAME}-admin']
 
-  caddy:
-    image: caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
-    restart: unless-stopped
-    ports:
-      - '80:80'
-      - '443:443'
-      - '443:443/udp' # HTTP/3
-    environment:
-      ADMIN_DOMAIN: ${ADMIN_DOMAIN:?ADMIN_DOMAIN مطلوب}
-      API_DOMAIN: ${API_DOMAIN:?API_DOMAIN مطلوب}
-      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL مطلوب}
-    volumes:
-      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
-      # الشهادات تُحفظ هنا — فقدان هذا الحجم يعني إعادة إصدار من Let's Encrypt
-      # واصطداماً بحدود المعدل عند التكرار.
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on: [api, admin]
+networks:
+  # تُنشأ مرة واحدة على الخادم: docker network create superapp-edge
+  edge:
+    external: true
+    name: superapp-edge
 
 volumes:
   dbdata:
-  caddy_data:
-  caddy_config:

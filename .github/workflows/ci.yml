@@ -109,6 +109,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
+    env:
+      # الحزمة تُسمّى بـSTACK_NAME، و`env_file` يتبع ENV_FILE — كلاهما لازم
+      # لكل أمر compose في هذا الـjob.
+      STACK_NAME: ci
+      ENV_FILE: .env.prod
+
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -120,13 +126,22 @@ jobs:
               -e 's|^JWT_ACCESS_SECRET=$|JWT_ACCESS_SECRET=ci-only-access-secret-000000|' \
               -e 's|^JWT_REFRESH_SECRET=$|JWT_REFRESH_SECRET=ci-only-refresh-secret-00000|' \
               -e 's|^ACME_EMAIL=.*|ACME_EMAIL=ci@example.com|' \
+              -e 's|^API_IMAGE=.*|API_IMAGE=superapp-api:latest|' \
+              -e 's|^ADMIN_IMAGE=.*|ADMIN_IMAGE=superapp-admin:latest|' \
               .env.prod.example > .env.prod
+
+      # الحزمة تنضم إلى شبكة الحافة المشتركة — تُنشأ مرة على الخادم، وهنا
+      # في كل تشغيل.
+      - name: Create the shared edge network
+        run: docker network create superapp-edge
 
       - name: Validate Caddyfile
         run: |
           docker run --rm \
-            -e ADMIN_DOMAIN=admin.example.com \
-            -e API_DOMAIN=api.example.com \
+            -e PROD_ADMIN_DOMAIN=admin.example.com \
+            -e PROD_API_DOMAIN=api.example.com \
+            -e STAGE_ADMIN_DOMAIN=stage.example.com \
+            -e STAGE_API_DOMAIN=api-stage.example.com \
             -e ACME_EMAIL=ci@example.com \
             -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
             caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
@@ -135,7 +150,7 @@ jobs:
         run: docker compose -f docker-compose.prod.yml --env-file .env.prod config --quiet
 
       - name: Build production images
-        run: docker compose -f docker-compose.prod.yml --env-file .env.prod build
+        run: docker compose -f docker-compose.prod.yml -f docker-compose.build.yml --env-file .env.prod build
 
       # الامتياز الأقل يُفحص لا يُفترض: `USER node` في Dockerfile سطر يسهل
       # حذفه في تعديل لاحق بلا أن ينتبه أحد.
@@ -195,6 +210,36 @@ jobs:
           docker compose -f docker-compose.prod.yml --env-file .env.prod run --rm api \
             node -r ./dist/apps/api/src/register-paths.js dist/apps/api/src/db/seed/seed.js \
             | grep -q 'seed completed'
+
+      # عزل البيئتين لا يُفترض بل يُفحص. ظهر خللان في يوم واحد من هذا الصنف
+      # بالضبط — حاوية تعمل بالبيئة الخطأ بلا أي خطأ — ولم يكشفهما إلا
+      # تشغيل الحزمتين معاً. هذا الفحص يجعل الثالثة تسقط في CI لا على خادم.
+      - name: Environments must not leak into each other
+        run: |
+          sed -e 's|^STACK_NAME=.*|STACK_NAME=stage|' \
+              -e 's|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=stage-only-password|' \
+              -e 's|^DATABASE_URL=.*|DATABASE_URL=postgres://superapp:stage-only-password@db:5432/superapp|' \
+              .env.prod > .env.stage
+
+          # ١) الأمر الناسي لـENV_FILE يجب أن **يسقط**، لا أن يلتقط .env.prod
+          if ENV_FILE= docker compose -f docker-compose.prod.yml --env-file .env.stage config >/dev/null 2>&1; then
+            echo "compose resolved without ENV_FILE — the silent default is back"
+            exit 1
+          fi
+          echo "forgetting ENV_FILE fails loudly"
+
+          # ٢) الغلاف يوصل بيئة التجربة لا الإنتاج
+          got=$(./deploy/compose.sh --env .env.stage config 2>/dev/null \
+                | grep -m1 -oE 'STACK_NAME: [a-z]+' | awk '{print $2}')
+          test "$got" = "stage" || { echo "wrapper resolved STACK_NAME=$got, expected stage"; exit 1; }
+          echo "wrapper resolves the staging environment"
+
+          # ٣) ولا يتسرّب سرّ الإنتاج إلى تعريف حزمة التجربة
+          if ./deploy/compose.sh --env .env.stage config 2>/dev/null | grep -q 'ci-only-password'; then
+            echo "production credentials leaked into the staging stack"
+            exit 1
+          fi
+          echo "no production credential in the staging stack"
 
       - name: Container logs on failure
         if: failure()

@@ -157,40 +157,177 @@ openssl rand -base64 36
 > ‏`NEXT_PUBLIC_API_URL` يُخبَز في حزمة المتصفح وقت البناء، وتغييره لاحقاً يستلزم
 > `--build` لا `restart`. وقيمته الأصل وحده — عميل الـAPI يضيف `/api/v1` بنفسه.
 
-### ٤. الإقلاع
+### ٤. أدوات التحقق
+
+الخادم يشغّل صوراً **موقَّعة** يبنيها CI وينشرها على GHCR — لا يبني شيئاً بنفسه.
+والتحقق من التوقيع يحتاج `cosign`:
 
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+curl -sSLo cosign https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64
 ```
+
+```bash
+sudo install -m 755 cosign /usr/local/bin/cosign && rm cosign
+```
+
+### ٥. الإقلاع
+
+```bash
+./deploy/deploy.sh
+```
+
+يسحب آخر صور منشورة، **ويتحقق من توقيعها قبل تشغيلها**، ثم يُقلع الحزمة.
+صورة لم تخرج من `publish.yml` في هذا المستودع لا تعمل — ولو دُفعت إلى الوسم
+نفسه. والتشغيل يتم بالـ`digest` لا بالوسم، فما جرى التحقق منه هو بالضبط ما
+يعمل.
 
 خدمة `migrate` تطبّق الهجرات وتخرج، ولا يقلع الـAPI قبل نجاحها — فلا تعمل نسخة
 جديدة على مخطط قديم.
 
-### ٥. الـseed مرة واحدة
+### ٦. الـseed مرة واحدة
 
 ينشئ حساب الأدمن والمدينة والأدوار:
 
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env.prod run --rm api \
+./deploy/compose.sh run --rm api \
   node -r ./dist/apps/api/src/register-paths.js dist/apps/api/src/db/seed/seed.js
 ```
 
 ثم افرغ `SEED_ADMIN_PASSWORD` من `.env.prod`. أول دخول إلى `https://admin.4irq.com`
 يطلب تسجيل TOTP أو مفتاح مرور.
 
+### العودة إلى إصدار سابق
+
+كل نشرة تحمل وسمها: `sha-<short>` من كل دمج، و`v1.2.3` (و`1.2` و`1`) من كل
+إصدار. الصورة موقَّعة ومحفوظة منذ نُشرت، فالعودة **لا تحتاج بناءً ولا
+`git revert`**:
+
+```bash
+./deploy/deploy.sh v1.1.0
+```
+
+يسحب، يتحقق من التوقيع، ويُقلع بالـ`digest`. ثوانٍ لا دقائق.
+
+**ما نشرتَه ومتى** في `.deploy/<stack>-history.tsv` — سطر لكل نشرة بالزمن
+والوسم والـdigest. بلا هذا السجل تصير العودة تخميناً لرقم.
+
+```bash
+tail -5 .deploy/prod-history.tsv
+```
+
+> **الهجرات لا تعود.** ‏drizzle يطبّق الهجرات إلى الأمام فقط: العودة إلى صورة
+> أقدم تعيد **الشيفرة** لا **المخطط**. إن كانت النشرة الفاشلة قد أضافت عموداً
+> فالعودة آمنة (الشيفرة القديمة تتجاهله)، وإن كانت قد حذفت أو أعادت تسمية
+> شيء فالعودة تكسر — عندها استرجع نسخة القاعدة الاحتياطية أيضاً. اقرأ الهجرة
+> قبل أن تعود.
+
+## بيئة التجربة (Staging)
+
+بيئتان على الخادم نفسه، **منفصلتان تماماً**: حاويات وأحجام وقاعدة بيانات لكلٍّ،
+يفصلها `STACK_NAME`. وCaddy واحد مشترك يخدمهما — لأن 80 و443 لا يربطهما أكثر من
+عملية.
+
+```
+                    ┌─ admin.4irq.com      → prod-admin
+   Caddy (80/443) ──┼─ api.4irq.com        → prod-api
+                    ├─ stage.4irq.com      → stage-admin
+                    └─ api-stage.4irq.com  → stage-api
+```
+
+### التهيئة مرة واحدة
+
+```bash
+docker network create superapp-edge
+```
+
+```bash
+cp .env.edge.example .env.edge   # النطاقات الأربعة وبريد ACME
+```
+
+```bash
+docker compose -f deploy/docker-compose.edge.yml --env-file .env.edge up -d
+```
+
+### تشغيل البيئتين
+
+```bash
+cp .env.stage.example .env.stage && chmod 600 .env.stage
+```
+
+```bash
+./deploy/deploy.sh --env .env.stage    # التجربة
+```
+
+```bash
+./deploy/deploy.sh                     # الإنتاج
+```
+
+### أوامر يدوية على أي من البيئتين
+
+**استعمل `deploy/compose.sh` لا `docker compose` مباشرة.** ‏compose يقرأ
+المتغيرات من مصدرين: `--env-file` للاستيفاء، و`env_file:` داخل الخدمة من
+`ENV_FILE`. الغلاف يضبط الاثنين معاً.
+
+ونسيان `ENV_FILE` **يسقط الأمر** ولا يلتقط `.env.prod` بصمت — لا قيمة افتراضية
+له عمداً. الافتراضي كان الخلل نفسه: أمرٌ يستهدف التجربة كان **ينجح** فيسلّم
+حاوية تُسمّى `superapp-stage-api` وتحمل رابط قاعدة الإنتاج وأسرارها. وفحص في CI
+يمنع عودة الافتراضي.
+
+```bash
+./deploy/compose.sh --env .env.stage logs -f api
+```
+
+```bash
+./deploy/compose.sh --env .env.stage run --rm api \
+  node -r ./dist/apps/api/src/register-paths.js dist/apps/api/src/db/seed/seed.js
+```
+
+### فحص ما نُشر
+
+```bash
+./deploy/verify-deployment.sh https://api-stage.4irq.com https://stage.4irq.com
+```
+
+يفحص من الخارج ما لا تفحصه حزمة الاختبارات: صلاحية الشهادة، وHSTS، ومنع
+التأطير، ورفض المسارات المحمية بلا توكن، وأن **حدّ المحاولات يرفض فعلاً** —
+وفشله هنا يعني غالباً أن `TRUST_PROXY` خاطئ فيرى الخادم عنوان الوكيل لكل الزوار.
+
+> حزمة `pnpm test` تُقلع Nest **داخل العملية** وتتحقق من قاعدة البيانات مباشرة،
+> فهي تختبر المنطق لا النشر ولا يمكن توجيهها إلى مضيف بعيد. السكربت أعلاه
+> يسأل السؤال الآخر: هل ما نُشر **مضبوط**؟
+
+### تطبيقات الهاتف على بيئة التجربة
+
+```bash
+EXPO_PUBLIC_API_URL=https://api-stage.4irq.com pnpm dev:driver
+```
+
+وللتوزيع: اضبط المتغير نفسه في ملف تعريف EAS.
+
+### مفاتيح المرور بين البيئتين
+
+مفتاح سُجّل على `stage.4irq.com` **لا يعمل** على `admin.4irq.com`. النطاق جزء من
+المفتاح تشفيرياً وهذا مقصود — التجربة تُجرَّب بمفاتيح تُرمى.
+
 ### التشغيل اليومي
 
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env.prod logs -f api
+./deploy/compose.sh logs -f api
 ```
 
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T db \
+./deploy/compose.sh exec -T db \
   pg_dump -U superapp superapp | gzip > backup-$(date +%F).sql.gz
 ```
 
-للتحديث بعد `git pull`: أعد الأمر في الخطوة ٤ نفسه — يبني ما تغيّر ويستبدل
-الحاويات بالتدريج.
+للتحديث: ادمج في `main` فينشر CI صوراً جديدة موقَّعة، ثم على الخادم
+`./deploy/deploy.sh`. لا بناء على الخادم إطلاقاً.
+
+للبناء محلياً (تطوير أو تجربة قبل الدفع):
+
+```bash
+docker compose -f docker-compose.prod.yml -f docker-compose.build.yml --env-file .env.prod build
+```
 
 ### ملاحظات تشغيلية
 
@@ -202,6 +339,11 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T db \
   `trusted_proxies` في Caddy.
 - **حجم `caddy_data` يحمل الشهادات**. حذفه يعني إعادة إصدار من Let's Encrypt
   واصطداماً بحدود المعدل عند التكرار.
+- **الصور تُبنى في CI لا على الخادم.** ‏`docker-compose.prod.yml` لا يحوي أي
+  `build:` عمداً: ما يعمل في الإنتاج هو بالضبط ما بناه CI ووقّعه. البناء
+  المحلي عبر تراكب `docker-compose.build.yml`.
+- **‏`NEXT_PUBLIC_API_URL` يُخبَز في صورة اللوحة وقت بنائها في CI**، وقيمته
+  من متغيّر المستودع على GitHub لا من `.env.prod`. تغييره يستلزم إعادة نشر.
 - **تغيير `WEBAUTHN_RP_ID` يبطل كل مفاتيح المرور المسجّلة** — النطاق جزء من
   المفتاح تشفيرياً. اختر النطاق النهائي قبل أن يسجّل أحد مفتاحه.
 

@@ -1,5 +1,10 @@
-# الوكيل العكسي وطبقة TLS. ‏Caddy يصدر شهادات Let's Encrypt ويجددها وحده،
-# ويعيد توجيه 80 إلى 443 تلقائياً. لا يحتاج إعداداً يدوياً للشهادات.
+# الوكيل العكسي وطبقة TLS للبيئتين. ‏Caddy يصدر شهادات Let's Encrypt ويجددها
+# وحده، ويعيد توجيه 80 إلى 443 تلقائياً.
+#
+# الوجهات أسماء مستعارة على شبكة superapp-edge تعلنها كل حزمة عن نفسها
+# (‏prod-api و stage-api …) — لا أسماء خدمات، لأن الحزمتين تحملان الأسماء
+# نفسها كلٌّ على شبكتها الداخلية.
+
 {
 	email {$ACME_EMAIL}
 }
@@ -14,27 +19,57 @@
 	}
 }
 
-# لوحة الإدارة
-{$ADMIN_DOMAIN} {
+(admin_site) {
 	import security_headers
 	# اللوحة لا تُؤطَّر في أي صفحة — يقطع هجمات النقر المخطوف
 	header X-Frame-Options "DENY"
 	encode zstd gzip
+}
 
-	reverse_proxy admin:3001 {
-		# استبدال لا إلحاق: لو ألحقنا لأمكن العميل أن يزوّر أول عنوان في
-		# السلسلة، فيقرأ Express عنواناً يختاره المهاجم ويسقط حدّ المحاولات.
-		header_up X-Forwarded-For {remote_host}
+(api_site) {
+	import security_headers
+	encode zstd gzip
+}
+
+# ‏X-Forwarded-For بالاستبدال لا بالإلحاق: لو ألحقنا لأمكن العميل أن يزوّر
+# أول عنوان في السلسلة، فيقرأ Express عنواناً يختاره المهاجم ويسقط حدّ
+# محاولات الدخول. يقابله TRUST_PROXY=1 في الـAPI.
+(upstream) {
+	header_up X-Forwarded-For {remote_host}
+}
+
+# ————— الإنتاج —————
+
+{$PROD_ADMIN_DOMAIN} {
+	import admin_site
+	reverse_proxy prod-admin:3001 {
+		import upstream
 	}
 }
 
-# ‏API — تستهلكه اللوحة وتطبيقات الهاتف الثلاثة.
-# ‏Caddy يمرّر ترقية WebSocket تلقائياً، فمسار Socket.io ‏(/rt) يعمل بلا إعداد.
-{$API_DOMAIN} {
-	import security_headers
-	encode zstd gzip
+# ‏Caddy يمرّر ترقية WebSocket تلقائياً، فمسار Socket.io ‏(/rt) يعمل بلا إعداد
+{$PROD_API_DOMAIN} {
+	import api_site
+	reverse_proxy prod-api:3000 {
+		import upstream
+	}
+}
 
-	reverse_proxy api:3000 {
-		header_up X-Forwarded-For {remote_host}
+# ————— بيئة التجربة —————
+#
+# مفاتيح المرور مربوطة بالنطاق تشفيرياً، فمفتاح سُجّل هنا لا يعمل على
+# الإنتاج والعكس. هذا مقصود: التجربة تُجرَّب بمفاتيح تُرمى.
+
+{$STAGE_ADMIN_DOMAIN} {
+	import admin_site
+	reverse_proxy stage-admin:3001 {
+		import upstream
+	}
+}
+
+{$STAGE_API_DOMAIN} {
+	import api_site
+	reverse_proxy stage-api:3000 {
+		import upstream
 	}
 }
