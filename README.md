@@ -157,16 +157,34 @@ openssl rand -base64 36
 > ‏`NEXT_PUBLIC_API_URL` يُخبَز في حزمة المتصفح وقت البناء، وتغييره لاحقاً يستلزم
 > `--build` لا `restart`. وقيمته الأصل وحده — عميل الـAPI يضيف `/api/v1` بنفسه.
 
-### ٤. الإقلاع
+### ٤. أدوات التحقق
+
+الخادم يشغّل صوراً **موقَّعة** يبنيها CI وينشرها على GHCR — لا يبني شيئاً بنفسه.
+والتحقق من التوقيع يحتاج `cosign`:
 
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+curl -sSLo cosign https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64
 ```
+
+```bash
+sudo install -m 755 cosign /usr/local/bin/cosign && rm cosign
+```
+
+### ٥. الإقلاع
+
+```bash
+./deploy/deploy.sh
+```
+
+يسحب آخر صور منشورة، **ويتحقق من توقيعها قبل تشغيلها**، ثم يُقلع الحزمة.
+صورة لم تخرج من `publish.yml` في هذا المستودع لا تعمل — ولو دُفعت إلى الوسم
+نفسه. والتشغيل يتم بالـ`digest` لا بالوسم، فما جرى التحقق منه هو بالضبط ما
+يعمل.
 
 خدمة `migrate` تطبّق الهجرات وتخرج، ولا يقلع الـAPI قبل نجاحها — فلا تعمل نسخة
 جديدة على مخطط قديم.
 
-### ٥. الـseed مرة واحدة
+### ٦. الـseed مرة واحدة
 
 ينشئ حساب الأدمن والمدينة والأدوار:
 
@@ -177,6 +195,16 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod run --rm api \
 
 ثم افرغ `SEED_ADMIN_PASSWORD` من `.env.prod`. أول دخول إلى `https://admin.4irq.com`
 يطلب تسجيل TOTP أو مفتاح مرور.
+
+### العودة إلى إصدار سابق
+
+كل نشرة تحمل وسم `sha-<short>` من الكوميت الذي أنتجها:
+
+```bash
+./deploy/deploy.sh sha-a1b2c3d
+```
+
+بلا إعادة بناء وبلا `git revert` — والتوقيع يُتحقَّق منه كما في أي نشرة.
 
 ### التشغيل اليومي
 
@@ -189,8 +217,14 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T db \
   pg_dump -U superapp superapp | gzip > backup-$(date +%F).sql.gz
 ```
 
-للتحديث بعد `git pull`: أعد الأمر في الخطوة ٤ نفسه — يبني ما تغيّر ويستبدل
-الحاويات بالتدريج.
+للتحديث: ادمج في `main` فينشر CI صوراً جديدة موقَّعة، ثم على الخادم
+`./deploy/deploy.sh`. لا بناء على الخادم إطلاقاً.
+
+للبناء محلياً (تطوير أو تجربة قبل الدفع):
+
+```bash
+docker compose -f docker-compose.prod.yml -f docker-compose.build.yml --env-file .env.prod build
+```
 
 ### ملاحظات تشغيلية
 
@@ -202,6 +236,11 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T db \
   `trusted_proxies` في Caddy.
 - **حجم `caddy_data` يحمل الشهادات**. حذفه يعني إعادة إصدار من Let's Encrypt
   واصطداماً بحدود المعدل عند التكرار.
+- **الصور تُبنى في CI لا على الخادم.** ‏`docker-compose.prod.yml` لا يحوي أي
+  `build:` عمداً: ما يعمل في الإنتاج هو بالضبط ما بناه CI ووقّعه. البناء
+  المحلي عبر تراكب `docker-compose.build.yml`.
+- **‏`NEXT_PUBLIC_API_URL` يُخبَز في صورة اللوحة وقت بنائها في CI**، وقيمته
+  من متغيّر المستودع على GitHub لا من `.env.prod`. تغييره يستلزم إعادة نشر.
 - **تغيير `WEBAUTHN_RP_ID` يبطل كل مفاتيح المرور المسجّلة** — النطاق جزء من
   المفتاح تشفيرياً. اختر النطاق النهائي قبل أن يسجّل أحد مفتاحه.
 

@@ -1,0 +1,27 @@
+# تراكب البناء المحلي. ‏docker-compose.prod.yml يسحب صوراً موقَّعة من GHCR
+# ولا يبني شيئاً — وهذا ما نريده على الخادم. لكن CI يحتاج بناء الصور من
+# المصدر ليفحصها في كل PR، وقد تحتاج أنت البناء محلياً قبل الدفع.
+#
+#   docker compose -f docker-compose.prod.yml -f docker-compose.build.yml \
+#     --env-file .env.prod build
+#
+# مع هذا الملف تصير API_IMAGE و ADMIN_IMAGE مجرّد أسماء محلية، ولا يُسحب شيء.
+
+services:
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+
+  admin:
+    build:
+      context: .
+      dockerfile: apps/admin/Dockerfile
+      args:
+        # يُخبَز في حزمة المتصفح — تغييره يستلزم إعادة بناء لا restart
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL مطلوب}

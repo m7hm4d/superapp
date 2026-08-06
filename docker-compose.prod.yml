@@ -3,7 +3,10 @@
 #   • الهجرات تُطبَّق في خدمة لمرة واحدة قبل إقلاع الـAPI، لا يدوياً.
 #   • ‏restart: unless-stopped على كل خدمة دائمة — تعود بعد إعادة تشغيل الخادم.
 #
-#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+#   ./deploy/deploy.sh          ← يتحقق من التوقيع ثم يسحب ويشغّل
+#
+# الصور تُسحب من GHCR ولا تُبنى هنا: البناء يحدث في CI مرة واحدة، والناتج
+# موقَّع. البناء محلياً للتطوير عبر docker-compose.build.yml.
 
 name: superapp
 
@@ -29,10 +32,7 @@ services:
   # تطبّق الهجرات ثم تخرج. الـAPI لا يقلع قبل نجاحها، فلا تعمل نسخة
   # جديدة على مخطط قديم.
   migrate:
-    build:
-      context: .
-      dockerfile: apps/api/Dockerfile
-    image: superapp-api:latest
+    image: ${API_IMAGE:?API_IMAGE مطلوب}
     restart: 'no'
     env_file: [.env.prod]
     depends_on:
@@ -41,10 +41,7 @@ services:
     command: ['node', 'dist/apps/api/src/db/migrate.js']
 
   api:
-    build:
-      context: .
-      dockerfile: apps/api/Dockerfile
-    image: superapp-api:latest
+    image: ${API_IMAGE:?API_IMAGE مطلوب}
     restart: unless-stopped
     env_file: [.env.prod]
     depends_on:
@@ -55,13 +52,7 @@ services:
     expose: ['3000']
 
   admin:
-    build:
-      context: .
-      dockerfile: apps/admin/Dockerfile
-      args:
-        # يُخبَز في حزمة المتصفح — تغييره يستلزم --build لا restart
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL مطلوب}
-    image: superapp-admin:latest
+    image: ${ADMIN_IMAGE:?ADMIN_IMAGE مطلوب}
     restart: unless-stopped
     depends_on: [api]
     expose: ['3001']
