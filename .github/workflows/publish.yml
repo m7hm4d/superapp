@@ -1,0 +1,120 @@
+name: Publish
+
+# ينشر صور الإنتاج إلى GHCR ويوقّعها. لا يعمل إلا على main بعد الدمج —
+# الـPRات تبني وتفحص في CI ولا تنشر شيئاً.
+on:
+  push:
+    branches: [main]
+    # التوثيق والنصوص لا تغيّر الصور
+    paths-ignore:
+      - '**/*.md'
+      - LICENSE
+      - .github/dependabot.yml
+  workflow_dispatch:
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+      packages: write
+      # ‏cosign بلا مفاتيح: التوقيع يستمد هويته من توكن OIDC الذي يصدره
+      # GitHub لهذا التشغيل تحديداً. لا مفتاح خاص يُخزَّن ولا يُسرَّق.
+      id-token: write
+      attestations: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: api
+            image: superapp-api
+            dockerfile: apps/api/Dockerfile
+          - app: admin
+            image: superapp-admin
+            dockerfile: apps/admin/Dockerfile
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+          # ‏sha-<short> هو الوسم الذي يُنشر به فعلاً؛ latest للراحة فقط.
+          # العودة إلى إصدار سابق تصير تغيير وسم لا إعادة بناء.
+          tags: |
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        id: build
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # ‏NEXT_PUBLIC_* يُخبَز في حزمة المتصفح وقت البناء، فالصورة المنشورة
+          # مربوطة بنطاق واحد. القيمة من متغير المستودع لا من الشيفرة.
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}
+          cache-from: type=gha,scope=${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.app }}
+          provenance: true
+          sbom: true
+
+      # التوقيع على الـdigest لا على الوسم: الوسم يتحرك، والتوقيع يجب أن
+      # يشير إلى بايتات بعينها.
+      - name: Sign the image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      # التحقق فوراً في نفس التشغيل: توقيع لا يمكن التحقق منه أسوأ من لا
+      # توقيع، لأنه يمنح ثقة لا أساس لها.
+      - name: Verify the signature we just made
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+        run: |
+          cosign verify \
+            --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/publish.yml@${{ github.ref }}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "${IMAGE}@${DIGEST}" > /dev/null
+          echo "signature verified for ${IMAGE}@${DIGEST}"
+
+      - name: Summary
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+        run: |
+          {
+            echo "### ${{ matrix.image }}"
+            echo ''
+            echo '```'
+            echo "${IMAGE}@${DIGEST}"
+            echo '```'
+            echo ''
+            echo "tags: ${{ steps.meta.outputs.tags }}"
+          } >> "$GITHUB_STEP_SUMMARY"

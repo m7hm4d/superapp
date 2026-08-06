@@ -120,6 +120,8 @@ jobs:
               -e 's|^JWT_ACCESS_SECRET=$|JWT_ACCESS_SECRET=ci-only-access-secret-000000|' \
               -e 's|^JWT_REFRESH_SECRET=$|JWT_REFRESH_SECRET=ci-only-refresh-secret-00000|' \
               -e 's|^ACME_EMAIL=.*|ACME_EMAIL=ci@example.com|' \
+              -e 's|^API_IMAGE=.*|API_IMAGE=superapp-api:latest|' \
+              -e 's|^ADMIN_IMAGE=.*|ADMIN_IMAGE=superapp-admin:latest|' \
               .env.prod.example > .env.prod
 
       - name: Validate Caddyfile
@@ -135,7 +137,7 @@ jobs:
         run: docker compose -f docker-compose.prod.yml --env-file .env.prod config --quiet
 
       - name: Build production images
-        run: docker compose -f docker-compose.prod.yml --env-file .env.prod build
+        run: docker compose -f docker-compose.prod.yml -f docker-compose.build.yml --env-file .env.prod build
 
       # الامتياز الأقل يُفحص لا يُفترض: `USER node` في Dockerfile سطر يسهل
       # حذفه في تعديل لاحق بلا أن ينتبه أحد.
