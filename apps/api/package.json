@@ -10,7 +10,8 @@
     "db:migrate": "ts-node -r tsconfig-paths/register src/db/migrate.ts",
     "db:seed": "ts-node -r tsconfig-paths/register src/db/seed/seed.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.6",
@@ -48,6 +49,7 @@
     "@types/node": "^24.3.0",
     "@types/pg": "^8.15.5",
     "@types/supertest": "^6.0.3",
+    "@vitest/coverage-v8": "^3.2.7",
     "drizzle-kit": "^0.31.10",
     "pino-pretty": "^13.1.1",
     "supertest": "^7.1.4",
