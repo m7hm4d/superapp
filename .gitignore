@@ -15,3 +15,4 @@ dist-export/
 coverage/
 ios/
 android/
+sbom/

@@ -16,7 +16,7 @@ jobs:
 
     services:
       db:
-        image: postgis/postgis:17-3.5
+        image: postgis/postgis:17-3.5@sha256:45f2a608397fa67d236b012c14a9e3ea31e9fe813edbeb5c1c0d1acbf0d48ea9
         env:
           POSTGRES_USER: superapp
           POSTGRES_PASSWORD: superapp
@@ -46,13 +46,13 @@ jobs:
       NODE_ENV: test
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 11.9.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
@@ -85,13 +85,13 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 11.9.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
@@ -110,7 +110,7 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # أسرار وهمية: هذا الـjob يتحقق من صحة التركيب لا من قيم الإنتاج
       - name: Materialise a throwaway .env.prod
@@ -129,13 +129,34 @@ jobs:
             -e API_DOMAIN=api.example.com \
             -e ACME_EMAIL=ci@example.com \
             -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
-            caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+            caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
       - name: Validate compose file
         run: docker compose -f docker-compose.prod.yml --env-file .env.prod config --quiet
 
       - name: Build production images
         run: docker compose -f docker-compose.prod.yml --env-file .env.prod build
+
+      # الامتياز الأقل يُفحص لا يُفترض: `USER node` في Dockerfile سطر يسهل
+      # حذفه في تعديل لاحق بلا أن ينتبه أحد.
+      - name: Images must not run as root
+        run: |
+          for image in superapp-api superapp-admin; do
+            uid=$(docker run --rm --entrypoint id "$image:latest" -u)
+            echo "$image runs as uid $uid"
+            test "$uid" != "0" || { echo "$image runs as root"; exit 1; }
+          done
+
+      # الشيفرة داخل الصورة ملك root والعملية ليست root — فلا تستطيع إعادة
+      # كتابة نفسها. الفحص يثبت أن الملكية لم تنقلب في تعديل لاحق.
+      - name: Application code must be immutable at runtime
+        run: |
+          if docker run --rm --entrypoint sh superapp-api:latest \
+               -c 'touch /repo/apps/api/dist/apps/api/src/.probe' 2>/dev/null; then
+            echo "the running user can rewrite application code"
+            exit 1
+          fi
+          echo "code is not writable by the runtime user"
 
       # دخان: الترتيب نفسه الذي يحدث على الخادم — القاعدة تصح، ثم تنجح
       # الهجرة وتخرج بصفر، ثم يقلع الـAPI واللوحة ويصيران سليمين.
@@ -183,6 +204,66 @@ jobs:
         if: always()
         run: docker compose -f docker-compose.prod.yml --env-file .env.prod down -v
 
+      # فحص الثغرات بعد الدخان لا قبله: خطأ في الحزمة نفسها أهم من ثغرة في
+      # طبقة أساس، ولا معنى لفحص صورة لا تقلع أصلاً.
+      #
+      # يسقط على CRITICAL و HIGH القابلة للإصلاح فقط. ثغرة بلا رقعة متاحة
+      # تُبلَّغ ولا توقف الدمج — لا يملك أحد إصلاحها اليوم، وحاجزٌ لا يمكن
+      # تجاوزه يُتعلَّم تجاهله.
+      - name: Scan images for vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: superapp-api:latest
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Scan the admin image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: superapp-admin:latest
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
+
+      # ‏SBOM لكل صورة: حين تُعلَن ثغرة في حزمة، السؤال الأول هو «هل هي
+      # عندنا وفي أي إصدار؟» — الإجابة من ملف محفوظ لا من إعادة بناء صورة
+      # قديمة قد لا تُبنى أصلاً.
+      # ‏Trivy يكتب إلى المسار المعطى ولا ينشئ مجلده الأب
+      - name: Prepare the SBOM directory
+        run: mkdir -p sbom
+
+      - name: SBOM for the API image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: superapp-api:latest
+          format: spdx-json
+          output: sbom/superapp-api.spdx.json
+
+      - name: SBOM for the admin image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: superapp-admin:latest
+          format: spdx-json
+          output: sbom/superapp-admin.spdx.json
+
+      - name: Summarise the SBOMs
+        run: |
+          for f in sbom/*.spdx.json; do
+            echo "$f: $(python3 -c "import json,sys;print(len(json.load(open('$f')).get('packages',[])))") packages"
+          done
+
+      - name: Upload SBOMs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom
+          path: sbom/*.spdx.json
+          retention-days: 90
+
   # تطبيقات الهاتف لا يلمسها CI اليوم بشيء سوى typecheck. الحزمة تنكسر بأشياء
   # لا يراها المدقّق: استيراد وحدة غير موجودة، وتعارض إصدارات في رسم Metro،
   # وملحق Expo يفشل عند التهيئة. التصدير يشغّل ذلك كله فعلاً.
@@ -203,13 +284,13 @@ jobs:
       EXPO_NO_TELEMETRY: '1'
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 11.9.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
