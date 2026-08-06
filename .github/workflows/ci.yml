@@ -217,6 +217,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # الاختبارات قبل التصدير: أسرع، وتسقط على منطق مكسور بلا انتظار الحزم
+      - name: Test ${{ matrix.app }}
+        working-directory: apps/${{ matrix.app }}
+        run: pnpm test
+
       - name: Export ${{ matrix.app }}
         working-directory: apps/${{ matrix.app }}
         run: pnpm exec expo export --platform android --output-dir dist-export

@@ -7,7 +7,9 @@
     "start": "expo start --port 8081",
     "ios": "expo run:ios",
     "android": "expo run:android",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "jest",
+    "test:watch": "jest --watch"
   },
   "dependencies": {
     "@expo-google-fonts/ibm-plex-sans-arabic": "^0.4.1",
@@ -47,8 +49,13 @@
   },
   "devDependencies": {
     "@babel/core": "^7.26.0",
+    "@testing-library/react-native": "^14.0.1",
+    "@types/jest": "^29.5.14",
     "@types/node": "^24.13.3",
     "@types/react": "~19.1.0",
+    "jest": "^29.7.0",
+    "jest-expo": "~54.0.17",
+    "react-test-renderer": "19.1.0",
     "typescript": "^5.9.2"
   }
 }

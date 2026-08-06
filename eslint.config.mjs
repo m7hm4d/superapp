@@ -89,7 +89,7 @@ export default tseslint.config(
   // tsconfig، فمحلّل الأنواع لا يجد لها برنامجاً ويسقط عند التحليل. تُفحص بلا
   // معرفة أنواع — وهو كل ما تحتاجه أصلاً.
   {
-    files: ['**/*.config.{js,mjs,cjs,ts,mts}', 'packages/config/*.js'],
+    files: ['**/*.config.{js,mjs,cjs,ts,mts}', 'packages/config/*.js', '**/jest.setup.js'],
     extends: [tseslint.configs.disableTypeChecked],
     languageOptions: {
       // ‏CommonJS: module و require و __dirname ليست عالمية بلا هذا
@@ -125,7 +125,8 @@ export default tseslint.config(
 
   // الاختبارات: التأكيدات تُنتج تعابير تبدو زائدة، والانتظار المتعمّد شائع
   {
-    files: ['**/test/**', '**/*.spec.ts'],
+    files: ['**/test/**', '**/*.spec.ts', '**/*.spec.tsx', '**/jest.setup.js'],
+    languageOptions: { globals: { ...globals.jest } },
     rules: {
       '@typescript-eslint/no-non-null-assertion': 'off',
       '@typescript-eslint/no-explicit-any': 'off',

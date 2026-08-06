@@ -20,3 +20,6 @@ allowBuilds:
   argon2: true
   esbuild: true
   sharp: true
+  # يجرّه jest-resolve@30 — محلّل مسارات أصلي. بلا إذن البناء يفشل أي أمر
+  # pnpm بـERR_PNPM_IGNORED_BUILDS لا اختبارات jest وحدها.
+  unrs-resolver: true

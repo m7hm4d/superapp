@@ -36,6 +36,7 @@
   "include": [
     "app",
     "src",
-    "nativewind-env.d.ts"
+    "nativewind-env.d.ts",
+    "test"
   ]
 }
