@@ -231,6 +231,10 @@ jobs:
       # ‏SBOM لكل صورة: حين تُعلَن ثغرة في حزمة، السؤال الأول هو «هل هي
       # عندنا وفي أي إصدار؟» — الإجابة من ملف محفوظ لا من إعادة بناء صورة
       # قديمة قد لا تُبنى أصلاً.
+      # ‏Trivy يكتب إلى المسار المعطى ولا ينشئ مجلده الأب
+      - name: Prepare the SBOM directory
+        run: mkdir -p sbom
+
       - name: SBOM for the API image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
