@@ -27,6 +27,12 @@ updates:
       day: saturday
     commit-message:
       prefix: 'chore(deps)'
+    ignore:
+      # ‏Node مثبَّت على 22 LTS: هو ما تشغّله CI وما تصرّح به @types/node.
+      # اقترح Dependabot 25-alpine — نسخة ليست LTS — وسقط الـdeploy عليها.
+      # ترقية الإصدار الرئيسي قرار يُتخذ مرة، لا اقتراح أسبوعي.
+      - dependency-name: node
+        update-types: ['version-update:semver-major']
 
   # ‏postgis وcaddy في ملفات Compose
   - package-ecosystem: docker-compose
@@ -55,7 +61,32 @@ updates:
       minor-and-patch:
         patterns: ['*']
         update-types: ['minor', 'patch']
+      # والرئيسية في PR واحد أيضاً: تحتاج قراءة ملاحظات الإصدار وتجربة،
+      # فمراجعة واحدة مركّزة أنفع من ثمانية PRات تُغلق بلا قراءة.
+      major:
+        patterns: ['*']
+        update-types: ['major']
     ignore:
+      # ——— حزم إصدارها الرئيسي مقيَّد بأداة أخرى ———
+      # ترقيتها منفردة **خاطئة دائماً**، لا خطرة فحسب. أثبت ذلك أول أسبوع:
+      # اقترح Dependabot الثلاثة، وسقطت الأولى والثانية في CI فوراً.
+      #
+      # ‏coverage-v8 يجب أن يطابق إصدار vitest الرئيسي — أُصلح هذا التضارب
+      # فعلاً من قبل: 4.x مع vitest 3 يرمي عند تحميل المزوّد.
+      - dependency-name: '@vitest/coverage-v8'
+        update-types: ['version-update:semver-major']
+      # ‏jest-expo مربوط بإصدار Expo SDK (54 هنا)
+      - dependency-name: jest-expo
+        update-types: ['version-update:semver-major']
+      # ‏@types/node يتبع Node 22 المستعمل في CI وفي صور الإنتاج
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
+      # ‏jest مربوط بـjest-expo: هبطنا إلى 29 لأن 30 يكسره
+      - dependency-name: jest
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@types/jest'
+        update-types: ['version-update:semver-major']
+
       # ‏Expo وReact Native مثبّتة عبر overrides في pnpm-workspace.yaml،
       # وترقيتها تتم بـ`expo install --fix` لا بـPR اعتماديات.
       - dependency-name: expo
