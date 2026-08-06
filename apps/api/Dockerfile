@@ -3,7 +3,7 @@
 # الأساس مثبَّت على digest لا على وسم: الوسم يتحرك، فبناءان من الشيفرة نفسها
 # قد ينتجان صورتين مختلفتين، ولا تعرف أيّهما على الخادم. يحدّثه Dependabot
 # بـPR يمرّ على CI كأي تغيير آخر.
-FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS base
+FROM node:25-alpine@sha256:bdf2cca6fe3dabd014ea60163eca3f0f7015fbd5c7ee1b0e9ccb4ced6eb02ef4 AS base
 WORKDIR /repo
 
 # ‏pnpm يعيش في مرحلة البناء وحدها. لو ورثته مرحلة التشغيل لشحنّا مدير حزم
