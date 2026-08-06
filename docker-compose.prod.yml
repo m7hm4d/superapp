@@ -70,6 +70,10 @@ services:
 
   admin:
     image: ${ADMIN_IMAGE:?ADMIN_IMAGE مطلوب}
+    # عنوان الـAPI وقت التشغيل: يُحقن في HTML عند كل طلب، فتصلح الصورة
+    # الواحدة لكل بيئة. ‏NEXT_PUBLIC_API_URL المخبوز يبقى احتياطاً للتطوير.
+    environment:
+      API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL مطلوب}
     restart: unless-stopped
     depends_on: [api]
     expose: ['3001']
