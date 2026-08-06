@@ -63,13 +63,18 @@ jobs:
           # ‏sha-<short> على كل دمج، وأرقام الإصدار على كل وسم `v*`.
           # العودة إلى إصدار سابق تصير تغيير وسم لا إعادة بناء.
           #
-          # ‏v1.2.3 يُنتج: 1.2.3 و 1.2 و 1 — فيمكن تثبيت الخادم على دقة
-          # يختارها هو: رقعة بعينها، أو آخر رقعة في ثانوي، أو آخر ثانوي.
+          # البادئة `v` مقصودة: metadata-action يحذفها افتراضياً فينتج
+          # `0.1.0` من الوسم `v0.1.0`. النتيجة أن `./deploy/deploy.sh v0.1.0`
+          # — وهو ما يقوله README وملاحظات الإصدار — يسحب وسماً لا وجود له.
+          # مطابقة وسم الصورة لوسم git تُلغي هذه الترجمة الذهنية كلها.
+          #
+          # ‏v1.2.3 يُنتج: v1.2.3 و v1.2 و v1 — فيثبّت الخادم على الدقة التي
+          # يختارها: رقعة بعينها، أو آخر رقعة في ثانوي، أو آخر ثانوي.
           tags: |
             type=sha,format=short
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
+            type=semver,pattern=v{{major}}
             type=raw,value=latest,enable={{is_default_branch}}
 
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
