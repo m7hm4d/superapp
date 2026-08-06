@@ -24,7 +24,14 @@ export interface DataTableProps<T> {
 function defaultCell<T>(row: T, key: string): ReactNode {
   const value = (row as unknown as Record<string, unknown>)[key];
   if (value === null || value === undefined || value === '') return '—';
-  return String(value);
+  // عمود بلا `render` قيمته كائن كان يُعرض "[object Object]" في الجدول،
+  // و`String(symbol)` يرمي استثناءً أصلاً. الأوّليات وحدها تُعرض، وما عداها
+  // شرطة: تقول إن القيمة موجودة وتحتاج `render` خاصاً بها.
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+    return String(value);
+  }
+  return '—';
 }
 
 export function DataTable<T>({

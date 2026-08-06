@@ -62,7 +62,7 @@ export function TotpEnroll({ setup, submitting, error, onConfirm }: TotpEnrollPr
         </p>
         <div className="flex flex-col items-center gap-3 rounded-card border border-zinc-200 bg-white p-4">
           {qr ? (
-            // eslint-disable-next-line @next/next/no-img-element -- data: URI مولّد محلياً
+            // ‏img لا Image: مصدره data: URI مولّد محلياً، ومحسّن Next لا يفيده
             <img src={qr} alt="رمز QR لتسجيل المصادقة الثنائية" width={220} height={220} />
           ) : qrFailed ? (
             <p className="text-xs text-red-600">

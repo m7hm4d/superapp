@@ -18,7 +18,7 @@ import { createCredential, signAuthentication } from './helpers/soft-authenticat
 
 const PASSWORD = 'Passkey#Test1234';
 const RP_ID = process.env.WEBAUTHN_RP_ID ?? 'localhost';
-const ORIGIN = (process.env.WEBAUTHN_ORIGINS ?? 'http://localhost:3001').split(',')[0] as string;
+const ORIGIN = (process.env.WEBAUTHN_ORIGINS ?? 'http://localhost:3001').split(',')[0];
 
 describe('admin passkeys', () => {
   let app: INestApplication;

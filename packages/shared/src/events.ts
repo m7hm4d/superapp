@@ -59,9 +59,9 @@ export interface ServerToClientEvents {
   'config:updated': (e: ConfigUpdatedEvent) => void;
 }
 
-export interface ClientToServerEvents {
-  // القراءة والأفعال كلها REST؛ لا أوامر عبر socket في الطيار.
-}
+// القراءة والأفعال كلها REST؛ لا أوامر عبر socket في الطيار.
+// واجهة فارغة تقبل أي قيمة غير عدمية، أما هذا فيمنع أي حدث فعلاً.
+export type ClientToServerEvents = Record<string, never>;
 
 export const SocketRooms = {
   user: (userId: string) => `user:${userId}`,

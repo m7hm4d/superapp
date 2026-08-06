@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo } from 'react';
-import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import { TILE_STYLE_URL } from './tiles';
 
@@ -118,7 +118,7 @@ export function MapView({
 
   return (
     <MLMapView
-      style={[styles.map, style as StyleProp<ViewStyle>]}
+      style={[styles.map, style]}
       mapStyle={TILE_STYLE_URL}
       logoEnabled={false}
       attributionEnabled={false}

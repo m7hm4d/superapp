@@ -31,7 +31,6 @@ export function expoSecureStorage(): TokenStorage {
     if (!mod) {
       // Lazy require so that importing @superapp/api-client does not pull in
       // expo-secure-store on platforms that don't have it (e.g. web admin).
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
       mod = require('expo-secure-store') as SecureStoreModule;
     }
     return mod;

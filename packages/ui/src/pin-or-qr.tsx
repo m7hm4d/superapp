@@ -36,7 +36,7 @@ export function PinOrQr({
   const [view, setView] = useState<'qr' | 'pin'>(defaultView);
 
   // معرّف غير صالح (بيانات ناقصة) لا يُنتج باركوداً — تُعرض الأرقام وحدها
-  let payload: string | null = null;
+  let payload: string | null;
   try {
     payload = buildScanPayload({ kind, id, pin });
   } catch {

@@ -41,7 +41,7 @@ export default function RegisterScreen() {
     onSuccess: (res) => {
       useAuthStore.getState().setSession(res.user);
       if (next) {
-        router.replace(next as never);
+        router.replace(next);
       } else {
         router.back();
       }
