@@ -74,3 +74,84 @@ jobs:
 
       - name: Build admin dashboard
         run: pnpm --filter @superapp/admin build
+
+  # حزمة النشر لا يلمسها job الاختبارات إطلاقاً: ملفات Compose وCaddy
+  # وDockerfileات تُكسر بصمت ولا يُكتشف ذلك إلا على الخادم. يعمل بالتوازي
+  # مع test فلا يطيل زمن CI.
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # أسرار وهمية: هذا الـjob يتحقق من صحة التركيب لا من قيم الإنتاج
+      - name: Materialise a throwaway .env.prod
+        run: |
+          sed -e 's|^POSTGRES_PASSWORD=$|POSTGRES_PASSWORD=ci-only-password|' \
+              -e 's|^DATABASE_URL=.*|DATABASE_URL=postgres://superapp:ci-only-password@db:5432/superapp|' \
+              -e 's|^JWT_ACCESS_SECRET=$|JWT_ACCESS_SECRET=ci-only-access-secret-000000|' \
+              -e 's|^JWT_REFRESH_SECRET=$|JWT_REFRESH_SECRET=ci-only-refresh-secret-00000|' \
+              -e 's|^ACME_EMAIL=.*|ACME_EMAIL=ci@example.com|' \
+              .env.prod.example > .env.prod
+
+      - name: Validate Caddyfile
+        run: |
+          docker run --rm \
+            -e ADMIN_DOMAIN=admin.example.com \
+            -e API_DOMAIN=api.example.com \
+            -e ACME_EMAIL=ci@example.com \
+            -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
+      - name: Validate compose file
+        run: docker compose -f docker-compose.prod.yml --env-file .env.prod config --quiet
+
+      - name: Build production images
+        run: docker compose -f docker-compose.prod.yml --env-file .env.prod build
+
+      # دخان: الترتيب نفسه الذي يحدث على الخادم — القاعدة تصح، ثم تنجح
+      # الهجرة وتخرج بصفر، ثم يقلع الـAPI واللوحة ويصيران سليمين.
+      - name: Smoke-test the stack
+        run: |
+          docker compose -f docker-compose.prod.yml --env-file .env.prod up -d db migrate api admin
+
+          # ‏ExitCode يساوي 0 للحاويات العاملة أيضاً، فالحالة تُفحص معه:
+          # المطلوب أن تكون الهجرة قد **انتهت** بنجاح لا أنها ما زالت تعمل.
+          echo "--- migrate must have exited 0 ---"
+          state=$(docker compose -f docker-compose.prod.yml --env-file .env.prod ps -a \
+            --format '{{.Service}} {{.State}} {{.ExitCode}}' | awk '$1=="migrate"{print $2" "$3}')
+          test "$state" = "exited 0" || { echo "migrate: $state"; exit 1; }
+
+          echo "--- wait for api and admin to report healthy ---"
+          for i in $(seq 1 60); do
+            healthy=$(docker compose -f docker-compose.prod.yml --env-file .env.prod ps \
+              --format '{{.Service}} {{.Health}}' | grep -c 'healthy' || true)
+            [ "$healthy" -ge 3 ] && break
+            sleep 5
+          done
+
+          echo "--- api answers, and reports the database up ---"
+          docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T api \
+            wget -qO- http://127.0.0.1:3000/api/v1/health | tee /dev/stderr | grep -q '"db":"up"'
+
+          echo "--- admin serves its login page ---"
+          docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T admin \
+            wget -qO- http://127.0.0.1:3001/login | grep -q '<title>'
+
+          echo "--- admin reaches the api over the compose network ---"
+          docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T admin \
+            wget -qO- http://api:3000/api/v1/health | grep -q '"status":"ok"'
+
+          echo "--- the seed runs from the shipped image ---"
+          docker compose -f docker-compose.prod.yml --env-file .env.prod run --rm api \
+            node -r ./dist/apps/api/src/register-paths.js dist/apps/api/src/db/seed/seed.js \
+            | grep -q 'seed completed'
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.prod.yml --env-file .env.prod logs --tail 60
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.prod.yml --env-file .env.prod down -v
