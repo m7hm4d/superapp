@@ -1,0 +1,8 @@
+{
+  "//": "بناء الإنتاج وحده. tsconfig.json يضمّ test عمداً ليفحصه typecheck،",
+  "//2": "لكن الاختبارات لا تُصرَّف إلى dist: هي وزن زائد في الصورة، وتستورد",
+  "//3": "حزماً لا ينسخها Dockerfile الـAPI (مثل @superapp/api-client).",
+  "extends": "./tsconfig.json",
+  "include": ["src", "../../packages/shared/src"],
+  "exclude": ["node_modules", "dist", "test", "**/*.spec.ts"]
+}
