@@ -2,6 +2,13 @@ packages:
   - "apps/*"
   - "packages/*"
 overrides:
+  # ثغرات في نسخ متعدية لا تملك حزمها ترقيةً بعد. تُحذف عند لحاق المنبع.
+  # ‏postcss: تجاوز مسار عبر sourceMappingURL و XSS في stringify — نستهلكه
+  # وقت البناء على CSS من المستودع نفسه، والترقية داخل 8.x مستقرة الواجهة.
+  postcss: ^8.5.23
+  # ‏sharp: ثغرات libvips الموروثة (CVE-2026-33327 وأخواتها). يستدعيه next
+  # لتحسين الصور، فالمدخل قد يكون صورة من الخارج.
+  sharp: ^0.35.0
   react-native-reanimated: ~4.1.1
   expo-secure-store: ~15.0.0
   "@expo/vector-icons": ~15.0.0
