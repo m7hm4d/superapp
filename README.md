@@ -117,9 +117,97 @@ pnpm --filter @superapp/api test
 
 تغطي: آلة حالات الطلب كاملة، سباق قبول الدفعات، PINات الاستلام/التسليم/التسوية، الدفتر والقيود العكسية، idempotency، وتدوير التوكنات.
 
-## النشر
+## النشر على VPS
 
-`docker-compose.yml` يشغّل PostGIS + الـ API (مع healthcheck). ضع Caddy أو أي reverse proxy أمامه للـ TLS، وانشر لوحة الإدارة بـ `next build` على أي مضيف Node. بناء التطبيقات للتوزيع عبر EAS:
+`docker-compose.prod.yml` يشغّل الحزمة كاملة: PostGIS + الـAPI + لوحة الإدارة + Caddy
+للـTLS. المنافذ المكشوفة هي 80 و443 فقط — القاعدة والـAPI واللوحة على شبكة داخلية
+لا تُرى من الإنترنت.
+
+الحد الأدنى المجرَّب: نواتان و4 GiB. مع 8 GiB فأكثر يمكن البناء على الخادم نفسه؛
+دون ذلك ابنِ الصور في CI وادفعها إلى مسجّل.
+
+### ١. تهيئة الخادم
+
+```bash
+curl -fsSL https://get.docker.com | sh
+```
+
+### ٢. الـDNS قبل كل شيء
+
+سجلّا `A` يشيران إلى عنوان الخادم — `admin.4irq.com` و`api.4irq.com`. لا يصدر Caddy
+شهادة قبل أن ينتشر السجلّ، فتحقق أولاً:
+
+```bash
+dig +short admin.4irq.com api.4irq.com
+```
+
+### ٣. الأسرار
+
+```bash
+cp .env.prod.example .env.prod && chmod 600 .env.prod
+```
+
+```bash
+openssl rand -base64 36
+```
+
+عبّئ `JWT_ACCESS_SECRET` و`JWT_REFRESH_SECRET` و`POSTGRES_PASSWORD` بقيم مولّدة،
+واضبط `DATABASE_URL` بكلمة المرور نفسها.
+
+> ‏`NEXT_PUBLIC_API_URL` يُخبَز في حزمة المتصفح وقت البناء، وتغييره لاحقاً يستلزم
+> `--build` لا `restart`. وقيمته الأصل وحده — عميل الـAPI يضيف `/api/v1` بنفسه.
+
+### ٤. الإقلاع
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+```
+
+خدمة `migrate` تطبّق الهجرات وتخرج، ولا يقلع الـAPI قبل نجاحها — فلا تعمل نسخة
+جديدة على مخطط قديم.
+
+### ٥. الـseed مرة واحدة
+
+ينشئ حساب الأدمن والمدينة والأدوار:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.prod run --rm api \
+  node -r ./dist/apps/api/src/register-paths.js dist/apps/api/src/db/seed/seed.js
+```
+
+ثم افرغ `SEED_ADMIN_PASSWORD` من `.env.prod`. أول دخول إلى `https://admin.4irq.com`
+يطلب تسجيل TOTP أو مفتاح مرور.
+
+### التشغيل اليومي
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.prod logs -f api
+```
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T db \
+  pg_dump -U superapp superapp | gzip > backup-$(date +%F).sql.gz
+```
+
+للتحديث بعد `git pull`: أعد الأمر في الخطوة ٤ نفسه — يبني ما تغيّر ويستبدل
+الحاويات بالتدريج.
+
+### ملاحظات تشغيلية
+
+- **`TRUST_PROXY=1` إلزامي خلف Caddy**. بدونه يرى الـAPI عنوان الوكيل لكل
+  الزوار: حدّ محاولات الدخول يصير مشتركاً بين الجميع، وسجل الجلسات يقيّد عنواناً
+  واحداً لا عنوان الأدمن. يقابله `header_up X-Forwarded-For {remote_host}` في
+  `deploy/Caddyfile` — استبدال لا إلحاق، وإلا زوّر العميل الترويسة وأسقط الحدّ.
+  إن أُضيف وكيل آخر أمام Caddy (‏Cloudflare مثلاً) ارفع القيمة إلى 2 واضبط
+  `trusted_proxies` في Caddy.
+- **حجم `caddy_data` يحمل الشهادات**. حذفه يعني إعادة إصدار من Let's Encrypt
+  واصطداماً بحدود المعدل عند التكرار.
+- **تغيير `WEBAUTHN_RP_ID` يبطل كل مفاتيح المرور المسجّلة** — النطاق جزء من
+  المفتاح تشفيرياً. اختر النطاق النهائي قبل أن يسجّل أحد مفتاحه.
+
+### تطبيقات الهاتف
+
+خارج Docker — التوزيع عبر EAS:
 
 ```bash
 pnpm exec eas build --platform android

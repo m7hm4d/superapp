@@ -1,0 +1,40 @@
+# الوكيل العكسي وطبقة TLS. ‏Caddy يصدر شهادات Let's Encrypt ويجددها وحده،
+# ويعيد توجيه 80 إلى 443 تلقائياً. لا يحتاج إعداداً يدوياً للشهادات.
+{
+	email {$ACME_EMAIL}
+}
+
+# ترويسات أمان مشتركة — HSTS يمنع الهبوط إلى HTTP بعد أول زيارة
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
+
+# لوحة الإدارة
+{$ADMIN_DOMAIN} {
+	import security_headers
+	# اللوحة لا تُؤطَّر في أي صفحة — يقطع هجمات النقر المخطوف
+	header X-Frame-Options "DENY"
+	encode zstd gzip
+
+	reverse_proxy admin:3001 {
+		# استبدال لا إلحاق: لو ألحقنا لأمكن العميل أن يزوّر أول عنوان في
+		# السلسلة، فيقرأ Express عنواناً يختاره المهاجم ويسقط حدّ المحاولات.
+		header_up X-Forwarded-For {remote_host}
+	}
+}
+
+# ‏API — تستهلكه اللوحة وتطبيقات الهاتف الثلاثة.
+# ‏Caddy يمرّر ترقية WebSocket تلقائياً، فمسار Socket.io ‏(/rt) يعمل بلا إعداد.
+{$API_DOMAIN} {
+	import security_headers
+	encode zstd gzip
+
+	reverse_proxy api:3000 {
+		header_up X-Forwarded-For {remote_host}
+	}
+}

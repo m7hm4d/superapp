@@ -1,0 +1,40 @@
+# سياق البناء يُرسل كاملاً إلى الـdaemon — كل ما هنا لا يُرسل أصلاً.
+# الأهم: node_modules و.next (‏196 ميغابايت وحدها) والأسرار.
+
+node_modules
+**/node_modules
+.git
+.gitignore
+.github
+
+# نواتج بناء تُعاد داخل الصورة
+dist
+**/dist
+.next
+**/.next
+.turbo
+**/.turbo
+coverage
+**/coverage
+*.tsbuildinfo
+**/*.tsbuildinfo
+
+# أسرار — لا تدخل صورة إطلاقاً
+.env
+.env.*
+!.env.example
+!.env.prod.example
+
+# تطبيقات الهاتف لا تُبنى في Docker (التوزيع عبر EAS)
+apps/customer
+apps/vendor
+apps/driver
+packages/map
+packages/ui
+
+# متفرقات
+*.log
+.DS_Store
+docker-compose*.yml
+Dockerfile*
+README.md

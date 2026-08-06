@@ -10,6 +10,12 @@ export const envSchema = z.object({
   JWT_REFRESH_TTL: z.string().default('30d'),
   CORS_ORIGINS: z.string().default('http://localhost:3001'),
   /**
+   * عدد الوكلاء العكسيين الموثوقين أمام الـAPI — 0 يعني اتصالاً مباشراً.
+   * ‏Caddy وحده = 1. يُضبط أعلى فقط إن أُضيف وكيل آخر أمامه (‏Cloudflare مثلاً).
+   * بدونه خلف وكيل: حدّ المحاولات وسجل الدخول يريان عنوان الوكيل لا العميل.
+   */
+  TRUST_PROXY: z.coerce.number().int().min(0).default(0),
+  /**
    * WebAuthn: المفتاح مربوط بالنطاق تشفيرياً، ولا يقبل عنوان IP إطلاقاً.
    * RP_ID نطاق مجرّد (admin.example.com) وORIGIN أصل كامل بمنفذه.
    * الافتراضي localhost للتطوير — يُضبط بنطاق الإنتاج عند النشر.

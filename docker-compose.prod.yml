@@ -1,0 +1,91 @@
+# النشر على VPS. الفرق الجوهري عن docker-compose.yml (بيئة التطوير):
+#   • لا منفذ مكشوفاً إلا 80/443 عبر Caddy — القاعدة والـAPI واللوحة على شبكة داخلية.
+#   • الهجرات تُطبَّق في خدمة لمرة واحدة قبل إقلاع الـAPI، لا يدوياً.
+#   • ‏restart: unless-stopped على كل خدمة دائمة — تعود بعد إعادة تشغيل الخادم.
+#
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+
+name: superapp
+
+services:
+  db:
+    image: postgis/postgis:17-3.5
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER مطلوب}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD مطلوب}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB مطلوب}
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    # لا ports — القاعدة لا تُعرَّض للإنترنت. الوصول من المضيف عبر
+    # docker compose exec db psql، أو نفق SSH عند الحاجة.
+
+  # تطبّق الهجرات ثم تخرج. الـAPI لا يقلع قبل نجاحها، فلا تعمل نسخة
+  # جديدة على مخطط قديم.
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: superapp-api:latest
+    restart: 'no'
+    env_file: [.env.prod]
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ['node', 'dist/apps/api/src/db/migrate.js']
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: superapp-api:latest
+    restart: unless-stopped
+    env_file: [.env.prod]
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    expose: ['3000']
+
+  admin:
+    build:
+      context: .
+      dockerfile: apps/admin/Dockerfile
+      args:
+        # يُخبَز في حزمة المتصفح — تغييره يستلزم --build لا restart
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL مطلوب}
+    image: superapp-admin:latest
+    restart: unless-stopped
+    depends_on: [api]
+    expose: ['3001']
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp' # HTTP/3
+    environment:
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN:?ADMIN_DOMAIN مطلوب}
+      API_DOMAIN: ${API_DOMAIN:?API_DOMAIN مطلوب}
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL مطلوب}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # الشهادات تُحفظ هنا — فقدان هذا الحجم يعني إعادة إصدار من Let's Encrypt
+      # واصطداماً بحدود المعدل عند التكرار.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [api, admin]
+
+volumes:
+  dbdata:
+  caddy_data:
+  caddy_config:
