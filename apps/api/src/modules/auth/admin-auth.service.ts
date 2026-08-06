@@ -12,6 +12,7 @@ import { and, eq, isNull, lt, or } from 'drizzle-orm';
 import { DB, DbClient } from '../../db/drizzle.module';
 import { adminCredentials, users } from '../../db/schema';
 import { AuthEventsService, type AuthContext } from './auth-events.service';
+import { PasskeyService } from './passkey.service';
 import { TokenService } from './token.service';
 import { totp, verifyTotpStep } from './totp';
 
@@ -51,6 +52,7 @@ export class AdminAuthService {
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     private readonly events: AuthEventsService,
+    private readonly passkeys: PasskeyService,
   ) {}
 
   async login(
@@ -83,8 +85,15 @@ export class AdminAuthService {
       throw new UnauthorizedException({ code: 'INVALID_CREDENTIALS' });
     }
 
-    // TOTP إلزامي — لا جلسة إدارية بعامل واحد
+    // TOTP إلزامي — لا جلسة إدارية بعامل واحد.
+    // من سجّل مفتاح مرور فقد استوفى العامل الثاني بمسار أقوى، فيدخل منه
+    // لا من هنا؛ ولا يُطالَب بتسجيل TOTP إضافي.
     if (!row.cred.totpEnabled || !row.cred.totpSecret) {
+      const passkeyCount = await this.passkeys.countFor(row.user.id);
+      if (passkeyCount > 0) {
+        await this.events.record({ ...event, userId: row.user.id, outcome: 'totp_required' });
+        throw new UnauthorizedException({ code: 'USE_PASSKEY' });
+      }
       await this.events.record({ ...event, userId: row.user.id, outcome: 'enrollment_required' });
       return {
         status: 'totp_enrollment_required',

@@ -6,6 +6,7 @@ import { useSocketEvent } from '@/lib/socket';
 import { Card, ErrorState, PageHeader, Skeleton } from '@/components/ui';
 import { CityForm, type AdminCity } from './_components/city-form';
 import { FlagsCard } from './_components/flags-card';
+import { PasskeyCard } from './_components/passkey-card';
 import { TotpCard } from './_components/totp-card';
 
 export default function SettingsPage() {
@@ -46,6 +47,10 @@ export default function SettingsPage() {
 
         <Card title="أعلام الميزات">
           <FlagsCard />
+        </Card>
+
+        <Card title="مفاتيح المرور (Passkeys)">
+          <PasskeyCard />
         </Card>
 
         <Card title="المصادقة الثنائية (MFA)">

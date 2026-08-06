@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@simplewebauthn/browser": "^13.3.0",
     "@superapp/api-client": "workspace:*",
     "@superapp/i18n": "workspace:*",
     "@superapp/shared": "workspace:*",
