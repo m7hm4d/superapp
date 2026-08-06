@@ -211,6 +211,36 @@ jobs:
             node -r ./dist/apps/api/src/register-paths.js dist/apps/api/src/db/seed/seed.js \
             | grep -q 'seed completed'
 
+      # عزل البيئتين لا يُفترض بل يُفحص. ظهر خللان في يوم واحد من هذا الصنف
+      # بالضبط — حاوية تعمل بالبيئة الخطأ بلا أي خطأ — ولم يكشفهما إلا
+      # تشغيل الحزمتين معاً. هذا الفحص يجعل الثالثة تسقط في CI لا على خادم.
+      - name: Environments must not leak into each other
+        run: |
+          sed -e 's|^STACK_NAME=.*|STACK_NAME=stage|' \
+              -e 's|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=stage-only-password|' \
+              -e 's|^DATABASE_URL=.*|DATABASE_URL=postgres://superapp:stage-only-password@db:5432/superapp|' \
+              .env.prod > .env.stage
+
+          # ١) الأمر الناسي لـENV_FILE يجب أن **يسقط**، لا أن يلتقط .env.prod
+          if ENV_FILE= docker compose -f docker-compose.prod.yml --env-file .env.stage config >/dev/null 2>&1; then
+            echo "compose resolved without ENV_FILE — the silent default is back"
+            exit 1
+          fi
+          echo "forgetting ENV_FILE fails loudly"
+
+          # ٢) الغلاف يوصل بيئة التجربة لا الإنتاج
+          got=$(./deploy/compose.sh --env .env.stage config 2>/dev/null \
+                | grep -m1 -oE 'STACK_NAME: [a-z]+' | awk '{print $2}')
+          test "$got" = "stage" || { echo "wrapper resolved STACK_NAME=$got, expected stage"; exit 1; }
+          echo "wrapper resolves the staging environment"
+
+          # ٣) ولا يتسرّب سرّ الإنتاج إلى تعريف حزمة التجربة
+          if ./deploy/compose.sh --env .env.stage config 2>/dev/null | grep -q 'ci-only-password'; then
+            echo "production credentials leaked into the staging stack"
+            exit 1
+          fi
+          echo "no production credential in the staging stack"
+
       - name: Container logs on failure
         if: failure()
         run: docker compose -f docker-compose.prod.yml --env-file .env.prod logs --tail 60

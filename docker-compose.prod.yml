@@ -37,10 +37,11 @@ services:
   migrate:
     image: ${API_IMAGE:?API_IMAGE مطلوب}
     restart: 'no'
-    # يتبع الملف المختار لا اسماً ثابتاً: `--env-file` يغذّي الاستيفاء
-    # ‏(${...}) فقط، أما env_file فمسار حرفي. تثبيته على .env.prod كان يسلّم
-    # حاويات التجربة **بيئة الإنتاج كاملة** — أسرارها ورابط قاعدتها.
-    env_file: ['${ENV_FILE:-.env.prod}']
+    # بلا قيمة افتراضية عمداً. القيمة الافتراضية هنا كانت الخلل نفسه: أمرٌ
+    # يستهدف التجربة وينسى ENV_FILE كان **ينجح** ويسلّم الحاوية بيئة الإنتاج،
+    # فتُسمّى superapp-stage-api وتحمل رابط قاعدة الإنتاج وأسرارها. الخطأ
+    # الصامت أخطر من الخطأ الصاخب — فليصرخ.
+    env_file: ['${ENV_FILE:?ENV_FILE مطلوب — استعمل deploy/compose.sh أو deploy/deploy.sh}']
     depends_on:
       db:
         condition: service_healthy
@@ -49,10 +50,11 @@ services:
   api:
     image: ${API_IMAGE:?API_IMAGE مطلوب}
     restart: unless-stopped
-    # يتبع الملف المختار لا اسماً ثابتاً: `--env-file` يغذّي الاستيفاء
-    # ‏(${...}) فقط، أما env_file فمسار حرفي. تثبيته على .env.prod كان يسلّم
-    # حاويات التجربة **بيئة الإنتاج كاملة** — أسرارها ورابط قاعدتها.
-    env_file: ['${ENV_FILE:-.env.prod}']
+    # بلا قيمة افتراضية عمداً. القيمة الافتراضية هنا كانت الخلل نفسه: أمرٌ
+    # يستهدف التجربة وينسى ENV_FILE كان **ينجح** ويسلّم الحاوية بيئة الإنتاج،
+    # فتُسمّى superapp-stage-api وتحمل رابط قاعدة الإنتاج وأسرارها. الخطأ
+    # الصامت أخطر من الخطأ الصاخب — فليصرخ.
+    env_file: ['${ENV_FILE:?ENV_FILE مطلوب — استعمل deploy/compose.sh أو deploy/deploy.sh}']
     depends_on:
       db:
         condition: service_healthy
