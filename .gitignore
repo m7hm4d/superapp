@@ -2,6 +2,8 @@ node_modules/
 dist/
 .next/
 .expo/
+# ناتج expo export — يولّده CI وقد تولّده محلياً للفحص
+dist-export/
 .turbo/
 *.log
 # كل ملفات البيئة سرّية إلا الأمثلة — .env.prod يحمل أسرار الإنتاج
