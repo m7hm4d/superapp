@@ -11,8 +11,11 @@ dist-export/
 .env.*
 !.env.example
 !.env.prod.example
+!.env.stage.example
+!.env.edge.example
 .DS_Store
 coverage/
 ios/
 android/
 sbom/
+.deploy/

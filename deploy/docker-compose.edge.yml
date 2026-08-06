@@ -1,0 +1,43 @@
+# حافة TLS مشتركة. ‏Caddy واحد على الخادم يخدم البيئتين — لأن 80 و443 لا
+# يمكن أن يربطهما أكثر من عملية، ولأن ACME يحتاجهما فعلاً.
+#
+# الحزمتان (‏prod و stage) تنضمّان إلى شبكة superapp-edge بأسماء مستعارة
+# ‏(prod-api و stage-api …)، وCaddy يوجّه إليها بالاسم.
+#
+#   docker network create superapp-edge          ← مرة واحدة
+#   docker compose -f deploy/docker-compose.edge.yml --env-file .env.edge up -d
+
+name: superapp-edge
+
+services:
+  caddy:
+    image: caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp' # HTTP/3
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL مطلوب}
+      PROD_ADMIN_DOMAIN: ${PROD_ADMIN_DOMAIN:?PROD_ADMIN_DOMAIN مطلوب}
+      PROD_API_DOMAIN: ${PROD_API_DOMAIN:?PROD_API_DOMAIN مطلوب}
+      # نطاقا التجربة اختياريان: الافتراضي ‎.localhost يجعل Caddy يصدر شهادة
+      # داخلية بدل أن يقصد Let's Encrypt لنطاق لا وجود له في DNS.
+      STAGE_ADMIN_DOMAIN: ${STAGE_ADMIN_DOMAIN:-stage-admin.localhost}
+      STAGE_API_DOMAIN: ${STAGE_API_DOMAIN:-stage-api.localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # الشهادات هنا — فقدان هذا الحجم يعني إعادة إصدار واصطداماً بحدود
+      # المعدل عند التكرار.
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [edge]
+
+networks:
+  edge:
+    external: true
+    name: superapp-edge
+
+volumes:
+  caddy_data:
+  caddy_config:

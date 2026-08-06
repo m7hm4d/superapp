@@ -3,12 +3,15 @@
 #   • الهجرات تُطبَّق في خدمة لمرة واحدة قبل إقلاع الـAPI، لا يدوياً.
 #   • ‏restart: unless-stopped على كل خدمة دائمة — تعود بعد إعادة تشغيل الخادم.
 #
-#   ./deploy/deploy.sh          ← يتحقق من التوقيع ثم يسحب ويشغّل
+#   ./deploy/deploy.sh                    ← الإنتاج
+#   ./deploy/deploy.sh --env .env.stage    ← بيئة التجربة
 #
 # الصور تُسحب من GHCR ولا تُبنى هنا: البناء يحدث في CI مرة واحدة، والناتج
 # موقَّع. البناء محلياً للتطوير عبر docker-compose.build.yml.
 
-name: superapp
+# ‏STACK_NAME يفصل بيئتين على خادم واحد: أسماء الحاويات والأحجام والشبكة
+# الداخلية كلها مشتقّة منه، فقاعدة التجربة لا تلمس قاعدة الإنتاج أبداً.
+name: superapp-${STACK_NAME:?STACK_NAME مطلوب (prod أو stage)}
 
 services:
   db:
@@ -34,7 +37,10 @@ services:
   migrate:
     image: ${API_IMAGE:?API_IMAGE مطلوب}
     restart: 'no'
-    env_file: [.env.prod]
+    # يتبع الملف المختار لا اسماً ثابتاً: `--env-file` يغذّي الاستيفاء
+    # ‏(${...}) فقط، أما env_file فمسار حرفي. تثبيته على .env.prod كان يسلّم
+    # حاويات التجربة **بيئة الإنتاج كاملة** — أسرارها ورابط قاعدتها.
+    env_file: ['${ENV_FILE:-.env.prod}']
     depends_on:
       db:
         condition: service_healthy
@@ -43,40 +49,38 @@ services:
   api:
     image: ${API_IMAGE:?API_IMAGE مطلوب}
     restart: unless-stopped
-    env_file: [.env.prod]
+    # يتبع الملف المختار لا اسماً ثابتاً: `--env-file` يغذّي الاستيفاء
+    # ‏(${...}) فقط، أما env_file فمسار حرفي. تثبيته على .env.prod كان يسلّم
+    # حاويات التجربة **بيئة الإنتاج كاملة** — أسرارها ورابط قاعدتها.
+    env_file: ['${ENV_FILE:-.env.prod}']
     depends_on:
       db:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
     expose: ['3000']
+    networks:
+      default: {}
+      # الاسم الذي يعرفه Caddy المشترك. لا يمكن استعمال اسم الخدمة لأن
+      # الحزمتين تحملان الأسماء نفسها على شبكتيهما الداخليتين.
+      edge:
+        aliases: ['${STACK_NAME}-api']
 
   admin:
     image: ${ADMIN_IMAGE:?ADMIN_IMAGE مطلوب}
     restart: unless-stopped
     depends_on: [api]
     expose: ['3001']
+    networks:
+      default: {}
+      edge:
+        aliases: ['${STACK_NAME}-admin']
 
-  caddy:
-    image: caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
-    restart: unless-stopped
-    ports:
-      - '80:80'
-      - '443:443'
-      - '443:443/udp' # HTTP/3
-    environment:
-      ADMIN_DOMAIN: ${ADMIN_DOMAIN:?ADMIN_DOMAIN مطلوب}
-      API_DOMAIN: ${API_DOMAIN:?API_DOMAIN مطلوب}
-      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL مطلوب}
-    volumes:
-      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
-      # الشهادات تُحفظ هنا — فقدان هذا الحجم يعني إعادة إصدار من Let's Encrypt
-      # واصطداماً بحدود المعدل عند التكرار.
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on: [api, admin]
+networks:
+  # تُنشأ مرة واحدة على الخادم: docker network create superapp-edge
+  edge:
+    external: true
+    name: superapp-edge
 
 volumes:
   dbdata:
-  caddy_data:
-  caddy_config:

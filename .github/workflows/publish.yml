@@ -5,11 +5,11 @@ name: Publish
 on:
   push:
     branches: [main]
-    # التوثيق والنصوص لا تغيّر الصور
-    paths-ignore:
-      - '**/*.md'
-      - LICENSE
-      - .github/dependabot.yml
+    # وسم إصدار ينشر الصور بأرقام الإصدار أيضاً — وهو ما يُنشر على الإنتاج.
+    tags: ['v*']
+    # لا paths-ignore عمداً: GitHub يطبّق مرشّح المسارات على دفعات الأوسمة
+    # أيضاً، فوسم إصدار على كوميت توثيقي كان يمرّ بلا نشر — ويبقى الإصدار
+    # بلا صور. إعادة نشر زائدة أرخص من إصدار ناقص.
   workflow_dispatch:
 
 concurrency:
@@ -60,10 +60,16 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
-          # ‏sha-<short> هو الوسم الذي يُنشر به فعلاً؛ latest للراحة فقط.
+          # ‏sha-<short> على كل دمج، وأرقام الإصدار على كل وسم `v*`.
           # العودة إلى إصدار سابق تصير تغيير وسم لا إعادة بناء.
+          #
+          # ‏v1.2.3 يُنتج: 1.2.3 و 1.2 و 1 — فيمكن تثبيت الخادم على دقة
+          # يختارها هو: رقعة بعينها، أو آخر رقعة في ثانوي، أو آخر ثانوي.
           tags: |
             type=sha,format=short
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
             type=raw,value=latest,enable={{is_default_branch}}
 
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
@@ -118,3 +124,55 @@ jobs:
             echo ''
             echo "tags: ${{ steps.meta.outputs.tags }}"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # إصدار GitHub يُنشأ **بعد** نجاح النشر والتوقيع، لا قبله: إصدار يشير إلى
+  # صور غير موجودة أسوأ من لا إصدار.
+  release:
+    needs: publish
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          {
+            echo '## الصور'
+            echo
+            echo '```'
+            echo "ghcr.io/${{ github.repository_owner }}/superapp-api:${TAG}"
+            echo "ghcr.io/${{ github.repository_owner }}/superapp-admin:${TAG}"
+            echo '```'
+            echo
+            echo 'موقَّعة بـcosign بلا مفاتيح. التحقق:'
+            echo
+            echo '```bash'
+            echo "cosign verify \\"
+            echo "  --certificate-identity-regexp '^https://github.com/${{ github.repository }}/\\.github/workflows/publish\\.yml@refs/(heads/main|tags/v.+)\$' \\"
+            echo "  --certificate-oidc-issuer https://token.actions.githubusercontent.com \\"
+            echo "  ghcr.io/${{ github.repository_owner }}/superapp-api:${TAG}"
+            echo '```'
+            echo
+            echo '## النشر'
+            echo
+            echo '```bash'
+            echo "./deploy/deploy.sh ${TAG}                   # الإنتاج"
+            echo "./deploy/deploy.sh --env .env.stage ${TAG}  # التجربة"
+            echo '```'
+          } > notes-header.md
+
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes-file notes-header.md \
+            --generate-notes \
+            --verify-tag
