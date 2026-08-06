@@ -6,7 +6,6 @@ import { CurrentUser, Roles } from '../../common/decorators';
 import type { RequestUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod.pipe';
 import { OrdersService } from './orders.service';
-import type { VendorOrdersTab } from './orders.service';
 
 /** قوائم شاشة البائع: جديد | قيد التحضير | جاهز | السجل */
 const zVendorOrdersQuery = z.object({
@@ -29,7 +28,7 @@ export class OrdersVendorController {
     @CurrentUser() user: RequestUser,
     @Query(new ZodValidationPipe(zVendorOrdersQuery)) query: VendorOrdersQuery,
   ): Promise<OrderView[]> {
-    return this.ordersService.listVendorOrders(user.id, query.status as VendorOrdersTab);
+    return this.ordersService.listVendorOrders(user.id, query.status);
   }
 
   @Post(':id/accept')

@@ -108,7 +108,7 @@ export class OrdersService {
       throw new NotFoundException({ code: 'ORDER_NOT_FOUND' });
     }
 
-    const from = order.status as OrderStatus;
+    const from = order.status;
     if (!canTransition(ORDER_TRANSITIONS, from, to, actor.role)) {
       throw new ConflictException({ code: 'ILLEGAL_TRANSITION', from, to });
     }

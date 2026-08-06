@@ -29,7 +29,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     console.error({ err: exception, requestId }, 'unhandled exception');
     if (process.env.SENTRY_DSN) {
       // استيراد كسول حتى لا يمس المسار الحرج عند غياب الإعداد
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const Sentry = require('@sentry/node') as typeof import('@sentry/node');
       Sentry.captureException(exception, { extra: { requestId } });
     }

@@ -63,6 +63,11 @@ jobs:
       - name: Typecheck all workspaces
         run: pnpm run typecheck
 
+      # قبل الهجرات: خطأ نمطي يُكتشف في ثوانٍ لا بعد إقلاع قاعدة بيانات.
+      # التحذيرات لا توقف البناء بعد — تُجمع أولاً ثم يُشدَّد الحد لاحقاً.
+      - name: Lint
+        run: pnpm run lint
+
       - name: Migrate database
         run: pnpm --filter @superapp/api db:migrate
 

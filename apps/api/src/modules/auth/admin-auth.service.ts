@@ -122,7 +122,7 @@ export class AdminAuthService {
         id: row.user.id,
         phone: row.user.phone,
         fullName: row.user.fullName,
-        role: row.user.role as Role,
+        role: row.user.role,
       },
       tokens,
     };
@@ -194,7 +194,7 @@ export class AdminAuthService {
         id: user.id,
         phone: user.phone,
         fullName: user.fullName,
-        role: user.role as Role,
+        role: user.role,
       },
       tokens,
     };

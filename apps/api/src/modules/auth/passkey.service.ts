@@ -214,7 +214,7 @@ export class PasskeyService {
         id: row.user.id,
         phone: row.user.phone,
         fullName: row.user.fullName,
-        role: row.user.role as Role,
+        role: row.user.role,
       },
       tokens,
     };

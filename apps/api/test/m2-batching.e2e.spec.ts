@@ -246,8 +246,8 @@ describe('M2 acceptance — batching, PINs, ledger, settlement', () => {
   });
 
   it('delivery: wrong PIN / wrong cash rejected; correct → DELIVERED with ledger entries', async () => {
-    const orderId = orderIds[0]!;
-    const info = orderInfo[orderId]!;
+    const orderId = orderIds[0];
+    const info = orderInfo[orderId];
 
     await request(http)
       .post(`/api/v1/driver/orders/${orderId}/deliver`)
@@ -281,7 +281,7 @@ describe('M2 acceptance — batching, PINs, ledger, settlement', () => {
   });
 
   it('exception on second order: no money moves, batch completes, admin cancels it', async () => {
-    const orderId = orderIds[1]!;
+    const orderId = orderIds[1];
     await request(http)
       .post(`/api/v1/driver/orders/${orderId}/exception`)
       .set('Authorization', `Bearer ${winnerAccess}`)
@@ -308,7 +308,7 @@ describe('M2 acceptance — batching, PINs, ledger, settlement', () => {
       .get('/api/v1/driver/ledger')
       .set('Authorization', `Bearer ${winnerAccess}`)
       .expect(200);
-    expect(ledger.body.cashOnHandIqd).toBe(orderInfo[orderIds[0]!]!.totalIqd);
+    expect(ledger.body.cashOnHandIqd).toBe(orderInfo[orderIds[0]].totalIqd);
 
     // الأدمن يحسم الاستثناء بإلغاء الطلب
     const exceptions = await request(http)
@@ -343,7 +343,7 @@ describe('M2 acceptance — batching, PINs, ledger, settlement', () => {
     const settlementId = init.body.id;
     const pin = init.body.settlementPin;
     expect(pin).toMatch(/^\d{4}$/);
-    expect(init.body.amountIqd).toBe(orderInfo[orderIds[0]!]!.subtotalIqd);
+    expect(init.body.amountIqd).toBe(orderInfo[orderIds[0]].subtotalIqd);
 
     await request(http)
       .post(`/api/v1/vendor/settlements/${settlementId}/confirm`)

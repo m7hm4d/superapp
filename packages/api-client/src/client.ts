@@ -55,6 +55,21 @@ interface ErrorBody {
   requestId?: unknown;
 }
 
+/**
+ * معاملات الاستعلام أوّلية فقط. المصفوفة تُضمّ بفواصل، وأي شيء آخر يُهمَل
+ * بدل أن يُرسَل "[object Object]" — الإهمال يُلاحَظ، والقيمة المشوّهة لا.
+ */
+function serialiseQueryValue(value: unknown): string | null {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (value instanceof Date) return value.toISOString();
+  if (Array.isArray(value)) {
+    const parts = value.map(serialiseQueryValue).filter((v): v is string => v !== null);
+    return parts.length > 0 ? parts.join(',') : null;
+  }
+  return null;
+}
+
 function buildUrl(
   baseUrl: string,
   path: string,
@@ -70,7 +85,11 @@ function buildUrl(
     const params: string[] = [];
     for (const [key, value] of Object.entries(query)) {
       if (value === undefined || value === null) continue;
-      params.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`);
+      // كائن يمرّ عبر String() يصير "[object Object]" في الرابط بصمت —
+      // معامل استعلام لا معنى له يصل الخادم بلا أي خطأ يُنبّه.
+      const serialised = serialiseQueryValue(value);
+      if (serialised === null) continue;
+      params.push(`${encodeURIComponent(key)}=${encodeURIComponent(serialised)}`);
     }
     if (params.length > 0) {
       url += `?${params.join('&')}`;

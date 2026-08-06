@@ -150,7 +150,7 @@ export class OpsService {
         throw new NotFoundException({ code: 'BATCH_NOT_FOUND' });
       }
 
-      const from = batch.status as BatchStatus;
+      const from = batch.status;
       const cancellable = from === BatchStatus.OFFERED || from === BatchStatus.CLAIMED;
       if (
         !cancellable ||

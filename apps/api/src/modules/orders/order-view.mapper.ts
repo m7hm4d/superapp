@@ -1,5 +1,5 @@
 import { ORDER_TERMINAL } from '@superapp/shared';
-import type { OrderItemView, OrderStatus, OrderView } from '@superapp/shared';
+import type { OrderItemView, OrderView } from '@superapp/shared';
 import type { orderItems, orders } from '../../db/schema';
 
 export type OrderRow = typeof orders.$inferSelect;
@@ -26,7 +26,7 @@ export function toOrderView(
   vendorNameAr: string,
   opts: OrderViewOptions,
 ): OrderView {
-  const isActive = !ORDER_TERMINAL.includes(order.status as OrderStatus);
+  const isActive = !ORDER_TERMINAL.includes(order.status);
   const view: OrderView = {
     id: order.id,
     code: order.code,

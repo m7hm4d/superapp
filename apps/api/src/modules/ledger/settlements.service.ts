@@ -174,7 +174,7 @@ export class SettlementsService {
       if (row.vendorId !== vendor.id) {
         throw new ForbiddenException({ code: 'FORBIDDEN' });
       }
-      const from = row.status as SettlementStatus;
+      const from = row.status;
       if (!canTransition(SETTLEMENT_TRANSITIONS, from, SettlementStatus.SETTLED, Role.VENDOR)) {
         throw new ConflictException({
           code: 'ILLEGAL_TRANSITION',
@@ -212,7 +212,7 @@ export class SettlementsService {
       if (row.vendorId !== vendor.id) {
         throw new ForbiddenException({ code: 'FORBIDDEN' });
       }
-      const from = row.status as SettlementStatus;
+      const from = row.status;
       if (!canTransition(SETTLEMENT_TRANSITIONS, from, SettlementStatus.DISPUTED, Role.VENDOR)) {
         throw new ConflictException({
           code: 'ILLEGAL_TRANSITION',
@@ -263,7 +263,7 @@ export class SettlementsService {
   ): Promise<SettlementView> {
     const resolved = await this.db.transaction(async (tx) => {
       const row = await this.lockSettlement(tx, settlementId);
-      const from = row.status as SettlementStatus;
+      const from = row.status;
       if (!canTransition(SETTLEMENT_TRANSITIONS, from, SettlementStatus.SETTLED, Role.ADMIN)) {
         throw new ConflictException({
           code: 'ILLEGAL_TRANSITION',

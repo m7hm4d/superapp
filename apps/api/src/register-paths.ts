@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-var-requires */
 /**
  * tsc لا يعيد كتابة أسماء المسارات (@superapp/shared) في الناتج المجمَّع،
  * فبدون هذا الـ hook يحلّها Node إلى مصدر TS الخام داخل node_modules.
