@@ -5,6 +5,12 @@
   "entryFile": "apps/api/src/main",
   "compilerOptions": {
     "deleteOutDir": true,
-    "tsConfigPath": "tsconfig.json"
+    "tsConfigPath": "tsconfig.json",
+    "assets": [
+      {
+        "include": "db/migrations/**/*",
+        "outDir": "dist/apps/api/src"
+      }
+    ]
   }
 }

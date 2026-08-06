@@ -4,8 +4,11 @@ dist/
 .expo/
 .turbo/
 *.log
+# كل ملفات البيئة سرّية إلا الأمثلة — .env.prod يحمل أسرار الإنتاج
 .env
-.env.local
+.env.*
+!.env.example
+!.env.prod.example
 .DS_Store
 coverage/
 ios/
