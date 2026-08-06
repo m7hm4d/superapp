@@ -155,3 +155,52 @@ jobs:
       - name: Tear down
         if: always()
         run: docker compose -f docker-compose.prod.yml --env-file .env.prod down -v
+
+  # تطبيقات الهاتف لا يلمسها CI اليوم بشيء سوى typecheck. الحزمة تنكسر بأشياء
+  # لا يراها المدقّق: استيراد وحدة غير موجودة، وتعارض إصدارات في رسم Metro،
+  # وملحق Expo يفشل عند التهيئة. التصدير يشغّل ذلك كله فعلاً.
+  #
+  # ‏Android وحدها: لا ملفات ‎.ios/.android في المستودع، فرسم الوحدات واحد
+  # للمنصتين — وتصدير الثانية يضاعف الزمن بلا أن يكشف شيئاً جديداً.
+  expo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    strategy:
+      # تطبيق يسقط لا يخفي حال الآخرين
+      fail-fast: false
+      matrix:
+        app: [customer, vendor, driver]
+
+    env:
+      EXPO_NO_TELEMETRY: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Export ${{ matrix.app }}
+        working-directory: apps/${{ matrix.app }}
+        run: pnpm exec expo export --platform android --output-dir dist-export
+
+      # تصدير ينجح بحزمة فارغة يمرّ صامتاً بلا هذا الفحص. الحزم الفعلية
+      # ‏5.5–5.7 ميغابايت، والحدّ عند واحد يكشف الانهيار بلا أن يرتجف مع النمو.
+      - name: Assert the bundle is real
+        working-directory: apps/${{ matrix.app }}
+        run: |
+          bundle=$(find dist-export -name '*.hbc' | head -1)
+          test -n "$bundle" || { echo "no Hermes bundle produced"; ls -R dist-export; exit 1; }
+          size=$(stat -c%s "$bundle")
+          echo "$bundle  $((size / 1024 / 1024))MB"
+          test "$size" -gt 1048576 || { echo "bundle is suspiciously small: $size bytes"; exit 1; }
