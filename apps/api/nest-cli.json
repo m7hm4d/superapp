@@ -5,7 +5,7 @@
   "entryFile": "apps/api/src/main",
   "compilerOptions": {
     "deleteOutDir": true,
-    "tsConfigPath": "tsconfig.json",
+    "tsConfigPath": "tsconfig.build.json",
     "assets": [
       {
         "include": "db/migrations/**/*",
