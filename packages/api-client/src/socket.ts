@@ -3,6 +3,7 @@ import type {
   ClientToServerEvents,
   ServerToClientEvents,
 } from '@superapp/shared';
+import { stripTrailingSlashes } from './url';
 
 export type Socket = IoSocket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -23,7 +24,7 @@ export interface CreateSocketOptions {
  * تذكير: الـ socket تلميح فقط — عند إعادة الاتصال أعد جلب القوائم عبر REST.
  */
 export function createSocket(opts: CreateSocketOptions): Socket {
-  const base = opts.baseUrl.replace(/\/+$/, '');
+  const base = stripTrailingSlashes(opts.baseUrl);
   const socket: Socket = io(`${base}/rt`, {
     transports: ['websocket'],
     // socket.io يقيّم الدالة عند كل محاولة اتصال — توكن حي دائماً

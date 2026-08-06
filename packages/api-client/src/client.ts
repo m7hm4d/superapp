@@ -1,4 +1,5 @@
 import type { TokenStorage } from './storage';
+import { stripLeadingSlashes, stripTrailingSlashes } from './url';
 import { uuid } from './uuid';
 
 /** خطأ API موحّد: {code, message?, requestId} من الباكند. */
@@ -59,8 +60,8 @@ function buildUrl(
   path: string,
   query?: Record<string, unknown>,
 ): string {
-  const base = baseUrl.replace(/\/+$/, '');
-  let p = path.replace(/^\/+/, '');
+  const base = stripTrailingSlashes(baseUrl);
+  let p = stripLeadingSlashes(path);
   if (p.startsWith('api/v1/')) {
     p = p.slice('api/v1/'.length);
   }
