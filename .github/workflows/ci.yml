@@ -63,22 +63,44 @@ jobs:
       - name: Typecheck all workspaces
         run: pnpm run typecheck
 
-      # قبل الهجرات: خطأ نمطي يُكتشف في ثوانٍ لا بعد إقلاع قاعدة بيانات.
-      # التحذيرات لا توقف البناء بعد — تُجمع أولاً ثم يُشدَّد الحد لاحقاً.
-      - name: Lint
-        run: pnpm run lint
-
       - name: Migrate database
         run: pnpm --filter @superapp/api db:migrate
 
       - name: Seed database
         run: pnpm --filter @superapp/api db:seed
 
-      - name: API e2e tests
-        run: pnpm --filter @superapp/api test
+      # مع التغطية: العتبات في vitest.config تُسقط الخطوة عند الانحدار،
+      # والملخّص يُطبع في السجل فيُرى الرقم بلا فتح تقرير.
+      - name: API e2e tests + coverage
+        run: pnpm --filter @superapp/api test:coverage
 
       - name: Build admin dashboard
         run: pnpm --filter @superapp/admin build
+
+  # ‏job مستقل لا خطوة داخل test: الفحص النمطي ينتهي في نحو دقيقة، فيصل
+  # خبر السقوط بدل انتظار أربع دقائق تقضيها قاعدة البيانات والاختبارات.
+  # التحذيرات لا توقف البناء بعد — تُجمع أولاً ثم يُشدَّد الحدّ.
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm run lint
 
   # حزمة النشر لا يلمسها job الاختبارات إطلاقاً: ملفات Compose وCaddy
   # وDockerfileات تُكسر بصمت ولا يُكتشف ذلك إلا على الخادم. يعمل بالتوازي
