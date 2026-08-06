@@ -46,6 +46,7 @@
     "app/**/*.tsx",
     "src/**/*.ts",
     "src/**/*.tsx",
-    "nativewind-env.d.ts"
+    "nativewind-env.d.ts",
+    "test"
   ]
 }
