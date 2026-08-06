@@ -109,6 +109,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
+    env:
+      # الحزمة تُسمّى بـSTACK_NAME، و`env_file` يتبع ENV_FILE — كلاهما لازم
+      # لكل أمر compose في هذا الـjob.
+      STACK_NAME: ci
+      ENV_FILE: .env.prod
+
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -124,11 +130,18 @@ jobs:
               -e 's|^ADMIN_IMAGE=.*|ADMIN_IMAGE=superapp-admin:latest|' \
               .env.prod.example > .env.prod
 
+      # الحزمة تنضم إلى شبكة الحافة المشتركة — تُنشأ مرة على الخادم، وهنا
+      # في كل تشغيل.
+      - name: Create the shared edge network
+        run: docker network create superapp-edge
+
       - name: Validate Caddyfile
         run: |
           docker run --rm \
-            -e ADMIN_DOMAIN=admin.example.com \
-            -e API_DOMAIN=api.example.com \
+            -e PROD_ADMIN_DOMAIN=admin.example.com \
+            -e PROD_API_DOMAIN=api.example.com \
+            -e STAGE_ADMIN_DOMAIN=stage.example.com \
+            -e STAGE_API_DOMAIN=api-stage.example.com \
             -e ACME_EMAIL=ci@example.com \
             -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
             caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
