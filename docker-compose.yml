@@ -2,7 +2,7 @@
 # (no Docker installed); this file is the deployment target (VPS) and CI database.
 services:
   db:
-    image: postgis/postgis:17-3.5
+    image: postgis/postgis:17-3.5@sha256:45f2a608397fa67d236b012c14a9e3ea31e9fe813edbeb5c1c0d1acbf0d48ea9
     environment:
       POSTGRES_USER: superapp
       POSTGRES_PASSWORD: superapp

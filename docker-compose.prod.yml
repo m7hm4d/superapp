@@ -9,7 +9,7 @@ name: superapp
 
 services:
   db:
-    image: postgis/postgis:17-3.5
+    image: postgis/postgis:17-3.5@sha256:45f2a608397fa67d236b012c14a9e3ea31e9fe813edbeb5c1c0d1acbf0d48ea9
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER مطلوب}
@@ -67,7 +67,7 @@ services:
     expose: ['3001']
 
   caddy:
-    image: caddy:2-alpine
+    image: caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
     restart: unless-stopped
     ports:
       - '80:80'

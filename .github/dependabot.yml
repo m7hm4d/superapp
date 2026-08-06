@@ -1,0 +1,67 @@
+version: 2
+
+# التثبيت بلا آلية تحديث يتحوّل إلى تعفّن: نُثبّت digest وSHA فتتجمّد الصور
+# والإجراءات على نسخة تشيخ ثم تصير هي نفسها الثغرة. هذا الملف هو الطرف الآخر
+# من التثبيت — يقترح الترقيات بـPR يمرّ على CI كأي تغيير.
+updates:
+  # ‏SHAs في .github/workflows — يحدّثها Dependabot ويُبقي تعليق الوسم
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: saturday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: 'ci(deps)'
+    groups:
+      actions:
+        patterns: ['*']
+
+  # ‏digestات صور الأساس في Dockerfileين
+  - package-ecosystem: docker
+    directories:
+      - /apps/api
+      - /apps/admin
+    schedule:
+      interval: weekly
+      day: saturday
+    commit-message:
+      prefix: 'chore(deps)'
+
+  # ‏postgis وcaddy في ملفات Compose
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+      day: saturday
+    commit-message:
+      prefix: 'chore(deps)'
+
+  # ‏npm أسبوعياً لا يومياً، وهذا مقصود: pnpm 11 يرفض افتراضياً أي حزمة
+  # نُشرت خلال 24 ساعة (minimumReleaseAge)، وDependabot يقترح الأحدث دائماً.
+  # اليومي يعني PRات تسقط CI بـERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION — وقد
+  # حدث مرتين. الأسبوعي يصل والحزم قد تجاوزت المهلة.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: saturday
+    open-pull-requests-limit: 10
+    versioning-strategy: increase
+    commit-message:
+      prefix: 'chore(deps)'
+    groups:
+      # ترقيات الرقعة والثانوية في PR واحد بدل عشرة
+      minor-and-patch:
+        patterns: ['*']
+        update-types: ['minor', 'patch']
+    ignore:
+      # ‏Expo وReact Native مثبّتة عبر overrides في pnpm-workspace.yaml،
+      # وترقيتها تتم بـ`expo install --fix` لا بـPR اعتماديات.
+      - dependency-name: expo
+      - dependency-name: react-native
+      - dependency-name: react
+      - dependency-name: react-dom
+      - dependency-name: 'expo-*'
+      - dependency-name: 'react-native-*'
+      - dependency-name: '@expo/*'

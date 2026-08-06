@@ -1,9 +1,14 @@
 # لوحة الإدارة — بناء متعدد المراحل بناتج Next المستقل
-FROM node:22-alpine AS base
-RUN corepack enable && corepack prepare pnpm@11.9.0 --activate
+FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS base
 WORKDIR /repo
 
-FROM base AS build
+# ‏pnpm أداة بناء لا أداة تشغيل. الناتج المستقل من Next يحمل تبعياته
+# المتتبَّعة معه، فمرحلة التشغيل لا تحتاج مدير حزم — ووراثته كانت تشحن
+# شجرة اعتمادياته كاملة إلى الإنتاج.
+FROM base AS toolchain
+RUN corepack enable && corepack prepare pnpm@11.9.0 --activate
+
+FROM toolchain AS build
 # متغيرات NEXT_PUBLIC_* تُخبَز في حزمة المتصفح وقت البناء لا وقت التشغيل،
 # فتغييرها لاحقاً يستلزم إعادة بناء الصورة.
 ARG NEXT_PUBLIC_API_URL
@@ -37,6 +42,12 @@ ENV NODE_ENV=production PORT=3001 HOSTNAME=0.0.0.0
 # الأصول الساكنة لا يضمّها Next للناتج المستقل، فتُنسخ يدوياً.
 COPY --from=build /repo/apps/admin/.next/standalone ./
 COPY --from=build /repo/apps/admin/.next/static ./apps/admin/.next/static
+
+# ‏npm نفسه ليس مطلوباً وقت التشغيل — التطبيق يعمل بـ`node` وحده. وحزم npm
+# المضمّنة في صورة الأساس كانت كل ما تبقّى من ثغرات الفحص (‏tar بدرجة
+# CRITICAL وbrace-expansion وsigstore وغيرها): شيفرة لا تُنفَّذ إطلاقاً لكنها
+# تُحسب في كل تدقيق وتوسّع سطح الهجوم بلا مقابل.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 USER node
 EXPOSE 3001
 HEALTHCHECK --interval=15s --timeout=5s --retries=5 \
