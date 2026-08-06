@@ -1,0 +1,53 @@
+حقوق النشر © 2026 m7hm4d. جميع الحقوق محفوظة.
+Copyright © 2026 m7hm4d. All rights reserved.
+
+## العربية
+
+هذا المستودع **مرئي للاطلاع فقط**، وليس برمجية مفتوحة المصدر.
+
+كون الشيفرة منشورة على GitHub لا يمنح أي ترخيص. جميع الحقوق محفوظة لصاحبها،
+ويُمنع بلا إذن خطي مسبق:
+
+- النسخ أو الاستنساخ أو التوزيع، كليًا أو جزئيًا.
+- التعديل أو اشتقاق أعمال منه.
+- الاستخدام التجاري أو الإنتاجي، لك أو لغيرك.
+- إعادة النشر أو الاستضافة أو بيعه كخدمة.
+
+**المسموح بلا إذن**: الاطلاع على الشيفرة وقراءتها، والاقتباس منها بالإشارة إلى
+المصدر لغرض التعليق أو المراجعة أو التعليم، وفتح Issue أو Pull Request للمساهمة
+في هذا المشروع نفسه.
+
+بإرسالك مساهمة إلى هذا المستودع، تمنح صاحب حقوق النشر ترخيصًا دائمًا غير حصري
+وغير قابل للنقض لاستخدام مساهمتك ضمن هذا المشروع.
+
+للاستفسار عن ترخيص: افتح Issue أو راجع [SECURITY.md](SECURITY.md) للمسائل
+الأمنية.
+
+**تنويه**: تُقدَّم الشيفرة «كما هي» بلا أي ضمان من أي نوع. لا يتحمل صاحب حقوق
+النشر أي مسؤولية عن أي ضرر ناتج عن استخدامها.
+
+## English
+
+This repository is **source-available for viewing only**. It is not open source.
+
+Publication on GitHub grants no license. All rights are reserved. Without prior
+written permission you may not:
+
+- copy, reproduce, or distribute it, in whole or in part;
+- modify it or create derivative works;
+- use it commercially or in production, for yourself or anyone else;
+- republish, host, or offer it as a service.
+
+**Permitted without permission**: reading the code, and quoting it with
+attribution for commentary, review, or teaching; and opening issues or pull
+requests that contribute to this project itself.
+
+By submitting a contribution to this repository, you grant the copyright holder
+a perpetual, non-exclusive, irrevocable license to use that contribution within
+this project.
+
+For licensing enquiries, open an issue. For security matters see
+[SECURITY.md](SECURITY.md).
+
+**Disclaimer**: the code is provided "as is", without warranty of any kind. The
+copyright holder accepts no liability for any damages arising from its use.

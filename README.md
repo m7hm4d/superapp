@@ -218,3 +218,9 @@ pnpm exec eas build --platform android
 - ‏`node-linker=hoisted` في `.npmrc` ضروري لتوافق Metro.
 - إصدارات Expo/RN مثبتة عبر `overrides` في `pnpm-workspace.yaml` — لا ترفعها يدوياً؛ استخدم `expo install --fix`.
 - ‏`apps/api/src/register-paths.ts` يجب أن يبقى أول استيراد في `main.ts` (حلّ `@superapp/shared` في الناتج المجمّع).
+
+## المساهمة والأمان والترخيص
+
+- المساهمة وسير العمل وشروط الدمج: [CONTRIBUTING.md](CONTRIBUTING.md)
+- الإبلاغ عن ثغرة (لا تفتح Issue عاماً): [SECURITY.md](SECURITY.md)
+- الترخيص: [LICENSE](LICENSE) — **مرئي للاطلاع فقط، وليس مفتوح المصدر**. جميع الحقوق محفوظة، ولا يمنح النشر على GitHub أي ترخيص استخدام.
