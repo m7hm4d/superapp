@@ -145,6 +145,9 @@ export class AdminService {
         .returning();
       const row = rows[0];
       if (!row) throw new NotFoundException({ code: 'PROFILE_NOT_FOUND' });
+      // عضوية الغرف تُحسم عند المصافحة: تعليق بائع لا يُخرجه من غرفة متجره
+      // ما لم يُقطع اتصاله فيعيد المصافحة بحالته الجديدة.
+      this.emitter.emit('approval.decided', { userId: row.userId });
       return row;
     }
 
@@ -155,6 +158,7 @@ export class AdminService {
       .returning();
     const row = rows[0];
     if (!row) throw new NotFoundException({ code: 'PROFILE_NOT_FOUND' });
+    this.emitter.emit('approval.decided', { userId: row.userId });
     return row;
   }
 
@@ -296,6 +300,8 @@ export class AdminService {
       .returning(USER_SAFE_COLUMNS);
     const row = rows[0];
     if (!row) throw new NotFoundException({ code: 'USER_NOT_FOUND' });
+    // الحظر كان يمنع الطلبات الجديدة ويترك الاتصال القائم يبثّ إلى صاحبه
+    if (status === UserStatus.BLOCKED) this.emitter.emit('user.blocked', { userId });
     return row;
   }
 

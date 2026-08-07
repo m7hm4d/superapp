@@ -99,6 +99,13 @@ export class DriversService {
     if (!updated) {
       throw new InternalServerErrorException({ code: 'INTERNAL_ERROR' });
     }
+    // عضوية غرفة العروض تُحسم عند المصافحة، فبلا هذا يظل من توقّف عن العمل
+    // يستقبل العروض حتى يقطع الاتصال، ولا يستقبلها من بدأ حتى يعيده.
+    this.emitter.emit('driver.availability', {
+      userId,
+      cityId: driver.cityId,
+      isAvailable: updated.isAvailable,
+    });
     return updated;
   }
 

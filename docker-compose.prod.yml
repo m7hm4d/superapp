@@ -83,10 +83,20 @@ services:
         aliases: ['${STACK_NAME}-admin']
 
 networks:
-  # تُنشأ مرة واحدة على الخادم: docker network create superapp-edge
+  # شبكة حافة **لكل حزمة**، لا واحدة مشتركة.
+  #
+  # حين كانت واحدة (`superapp-edge`) كانت حاويات التجربة تصل مباشرة إلى
+  # `prod-api:3000` و`prod-admin:3001` بلا مرور بـCaddy: انتقال جانبي من
+  # اختراق بيئة تجربة إلى شبكة الإنتاج. والأسوأ أن `TRUST_PROXY=1` يجعل
+  # الـAPI يثق بترويسة القفزة المباشرة، فتزوّر حاوية التجربة
+  # `X-Forwarded-For` وتتجاوز الحدّ على محاولات الدخول وتلوّث السجل.
+  #
+  # ‏Caddy وحده ينضم إلى الشبكتين — فهو المنفذ الوحيد بينهما.
+  #   docker network create superapp-edge-prod
+  #   docker network create superapp-edge-stage
   edge:
     external: true
-    name: superapp-edge
+    name: superapp-edge-${STACK_NAME:?STACK_NAME مطلوب}
 
 volumes:
   dbdata:
