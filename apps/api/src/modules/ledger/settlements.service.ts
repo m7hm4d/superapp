@@ -19,8 +19,9 @@ import type { SQL } from 'drizzle-orm';
 import { generatePin } from '../../common/codes';
 import { PinGuardService } from '../../common/pin-guard.service';
 import { DB, DbClient } from '../../db/drizzle.module';
+import { DriverDirectoryService } from '../deliveries/driver-directory.service';
 import { VendorDirectoryService } from '../vendors/vendor-directory.service';
-import { driverProfiles, settlements, users, vendorProfiles } from '../../db/schema';
+import { settlements } from '../../db/schema';
 import type { SettlementUpdatedDomainEvent } from '../../realtime/events.publisher';
 import { LedgerService, parseOrderIds } from './ledger.service';
 import type { DbTx, DriverOwedByVendorRow, VendorOutstandingByDriverRow } from './ledger.service';
@@ -63,6 +64,7 @@ export class SettlementsService {
   constructor(
     @Inject(DB) private readonly db: DbClient,
     private readonly vendors: VendorDirectoryService,
+    private readonly drivers: DriverDirectoryService,
     private readonly ledger: LedgerService,
     private readonly emitter: EventEmitter2,
     private readonly pinGuard: PinGuardService,
@@ -305,11 +307,7 @@ export class SettlementsService {
    * التحديث، لذا تُمرر الحالة الهدف صراحةً. driverUserId يُحل من ملف السائق.
    */
   private async emitSettlementUpdated(row: SettlementRow, status: SettlementStatus): Promise<void> {
-    const [driver] = await this.db
-      .select({ userId: driverProfiles.userId })
-      .from(driverProfiles)
-      .where(eq(driverProfiles.id, row.driverId))
-      .limit(1);
+    const driver = await this.drivers.summaryFor(row.driverId);
     if (!driver) return; // FK يضمن الوجود عملياً؛ حماية فقط — البث تلميح لا حقيقة
     const event: SettlementUpdatedDomainEvent = {
       settlementId: row.id,
@@ -337,12 +335,7 @@ export class SettlementsService {
   private async requireDriverProfile(
     userId: string,
   ): Promise<{ id: string; fullName: string }> {
-    const [row] = await this.db
-      .select({ id: driverProfiles.id, fullName: users.fullName })
-      .from(driverProfiles)
-      .innerJoin(users, eq(users.id, driverProfiles.userId))
-      .where(eq(driverProfiles.userId, userId))
-      .limit(1);
+    const row = await this.drivers.summaryForUser(userId);
     if (!row) {
       // ApprovedGuard يمنع الوصول قبل هذا عادةً؛ حماية إضافية فقط
       throw new ForbiddenException({
@@ -385,20 +378,31 @@ export class SettlementsService {
     );
   }
 
-  private selectViews(condition: SQL) {
-    return this.db
-      .select({
-        settlement: settlements,
-        vendorNameAr: vendorProfiles.storeNameAr,
-        driverName: users.fullName,
-      })
+  /**
+   * التصفية على `settlements` وحده — وهو ملك هذه الوحدة — والانضمامات كانت
+   * إثراءً بالأسماء لا أكثر. فصارت ثلاثة استعلامات محدودة بخمسين بدل انضمام
+   * ثلاثي: صفوف التسوية، ثم أسماء المتاجر، ثم أسماء السائقين — وضمٌّ في
+   * الذاكرة. لا نداء لكل صف.
+   */
+  private async selectViews(condition: SQL) {
+    const rows = await this.db
+      .select()
       .from(settlements)
-      .innerJoin(vendorProfiles, eq(vendorProfiles.id, settlements.vendorId))
-      .innerJoin(driverProfiles, eq(driverProfiles.id, settlements.driverId))
-      .innerJoin(users, eq(users.id, driverProfiles.userId))
       .where(condition)
       .orderBy(desc(settlements.createdAt))
       .limit(50);
+    if (rows.length === 0) return [];
+
+    const [vendorsById, driversById] = await Promise.all([
+      this.vendors.summariesFor(rows.map((r) => r.vendorId)),
+      this.drivers.summariesFor(rows.map((r) => r.driverId)),
+    ]);
+
+    return rows.map((settlement) => ({
+      settlement,
+      vendorNameAr: vendorsById.get(settlement.vendorId)?.storeNameAr ?? '',
+      driverName: driversById.get(settlement.driverId)?.fullName ?? '',
+    }));
   }
 
   private async loadView(

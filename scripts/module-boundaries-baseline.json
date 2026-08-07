@@ -163,11 +163,6 @@
     ],
     [
       "ledger",
-      "driverProfiles",
-      "apps/api/src/modules/ledger/settlements.service.ts"
-    ],
-    [
-      "ledger",
       "orders",
       "apps/api/src/modules/ledger/ledger.service.ts"
     ],
@@ -178,18 +173,8 @@
     ],
     [
       "ledger",
-      "users",
-      "apps/api/src/modules/ledger/settlements.service.ts"
-    ],
-    [
-      "ledger",
       "vendorProfiles",
       "apps/api/src/modules/ledger/ledger.service.ts"
-    ],
-    [
-      "ledger",
-      "vendorProfiles",
-      "apps/api/src/modules/ledger/settlements.service.ts"
     ],
     [
       "orders",
