@@ -38,6 +38,24 @@
 	header_up X-Forwarded-For {remote_host}
 }
 
+# ————— الصفحة التعريفية —————
+#
+# ملفات ساكنة فقط: لا وكيل عكسي ولا وصول إلى أي خدمة. صفحة تعريف بالفكرة،
+# فلا سبب لأن تلمس API ولا أن تعرف بوجوده.
+{$SITE_DOMAIN:4irq.com} {
+	import security_headers
+	header X-Frame-Options "DENY"
+	# لا سكربتات ولا موارد خارجية في الصفحة — فالسياسة تمنعها كلها
+	header Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+	encode zstd gzip
+	root * /srv/site
+	file_server
+}
+
+www.{$SITE_DOMAIN:4irq.com} {
+	redir https://{$SITE_DOMAIN:4irq.com}{uri} permanent
+}
+
 # ————— الإنتاج —————
 
 {$PROD_ADMIN_DOMAIN} {
