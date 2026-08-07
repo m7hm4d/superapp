@@ -3,9 +3,11 @@ import {
   ExecutionContext,
   Inject,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { UserStatus } from '@superapp/shared';
@@ -31,7 +33,10 @@ export class JwtAuthGuard implements CanActivate {
     private readonly reflector: Reflector,
     private readonly config: ConfigService,
     @Inject(DB) private readonly db: DbClient,
+    private readonly emitter: EventEmitter2,
   ) {}
+
+  private readonly logger = new Logger(JwtAuthGuard.name);
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
@@ -127,6 +132,44 @@ export class JwtAuthGuard implements CanActivate {
     if (!account || account.status !== UserStatus.ACTIVE || !session) {
       throw new UnauthorizedException({ code: 'SESSION_REVOKED' });
     }
+
+    // تغيّر الدور يُنهي الجلسة، ولا يُطبَّق على رمز قائم.
+    //
+    // كان الحارس يأخذ دور القاعدة ويمضي. الخفض يعمل، لكن **الترقية** كانت
+    // تمنح رمزاً صدر لزبون صلاحيات أدمن بلا مصادقة إدارة ولا عامل ثانٍ —
+    // ودخول الإدارة في هذا النظام بريد وكلمة مرور وTOTP عبر مسار منفصل.
+    // كتبتُ حينها اختباراً يتوقع ذلك السلوك، فكرّس العيب بدل أن يمسكه.
+    //
+    // والرفض وحده لا يكفي: العائلة تبقى حيّة فيجدّد العميل ويحصل على رمز
+    // بالدور الجديد. لذلك يُبطَل هنا — الكشف نفسه هو ما يُنهي الجلسات،
+    // فلا يحتاج الأمر مساراً إدارياً يتذكّر أحدٌ استدعاءه.
+    if (account.role !== payload.role) {
+      await this.revokeAllSessions(payload.sub, account.role, payload.role);
+      throw new UnauthorizedException({ code: 'SESSION_REVOKED' });
+    }
+
     return account.role;
+  }
+
+  /**
+   * يُبطل **كل** عائلات المستخدم لا عائلة الرمز وحدها: تغيّر الدور يخصّ
+   * الحساب فتسقط أجهزته جميعاً، ويعيد الدخول من المسار الذي يفرضه دوره
+   * الجديد — والإدارة تفرض بريداً وكلمة مرور وTOTP.
+   *
+   * الكتابة قبل الرمي لا بعده: لو رُمي أولاً لبقيت العائلة حيّة لحظةً
+   * تكفي لتجديد ناجح.
+   */
+  private async revokeAllSessions(userId: string, dbRole: string, tokenRole: string): Promise<void> {
+    const revoked = await this.db
+      .update(refreshTokens)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(refreshTokens.userId, userId), isNull(refreshTokens.revokedAt)))
+      .returning({ familyId: refreshTokens.familyId });
+
+    this.logger.warn(
+      `role changed: user=${userId} token=${tokenRole} db=${dbRole} — revoked ${revoked.length} token(s)`,
+    );
+    // قطع الاتصالات القائمة أيضاً: البوابة تفحص الدور عند المصافحة وحدها
+    this.emitter.emit('user.blocked', { userId });
   }
 }

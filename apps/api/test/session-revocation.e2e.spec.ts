@@ -88,30 +88,57 @@ describe('REST session revocation is immediate', () => {
   });
 
   /**
-   * `RolesGuard` يقرأ ما يضعه حارس المصادقة. أخذُ الدور من الرمز كان يعني
-   * أن خفض الصلاحيات بلا أثر حتى ينتهي — ورمز أدمن سابق يبقى أدمن.
+   * انحدار: الترقية الصامتة.
+   *
+   * أخذُ الدور من القاعدة يُصلح الخفض، لكنه كان يمنح رمزاً صدر لزبون
+   * صلاحيات أدمن بمجرد تغيّر الصف — بلا مصادقة إدارة ولا عامل ثانٍ، ودخول
+   * الإدارة هنا بريد وكلمة مرور وTOTP عبر مسار منفصل. والاختبار الأول
+   * لهذا الملف كان يتوقع تلك الترقية ويعدّها صحيحة.
    */
-  it('الدور يُقرأ من القاعدة لا من الرمز', async () => {
+  it('ترقية الدور لا تُمنح لرمز قائم — تُنهي الجلسة', async () => {
     const s = await newSession();
-    // مسار إداري: زبون يُرفض بـ403 لا 401 — أي أن المصادقة مرّت والدور رُفض
-    expect(
-      (
-        await request(http)
-          .get('/api/v1/admin/auth-events')
-          .set('Authorization', `Bearer ${s.access}`)
-      ).status,
-    ).toBe(403);
+    expect(await meStatus(s.access)).toBe(200);
 
     await db.update(users).set({ role: Role.ADMIN }).where(eq(users.id, s.userId));
 
-    // الرمز نفسه لم يتغيّر، ودوره فيه ما زال customer — لكن القاعدة تقول admin
+    // الرمز القديم لا يكتسب شيئاً — يُرفض
+    const res = await request(http).get('/api/v1/auth/me').set('Authorization', `Bearer ${s.access}`);
+    expect(res.status).toBe(401);
+    expect(res.body.code).toBe('SESSION_REVOKED');
+
+    // ولا يصل إلى مسار إداري لا بـ403 ولا بـ200
     expect(
-      (
-        await request(http)
-          .get('/api/v1/admin/auth-events')
-          .set('Authorization', `Bearer ${s.access}`)
-      ).status,
-    ).toBe(200);
+      (await request(http).get('/api/v1/admin/auth-events').set('Authorization', `Bearer ${s.access}`))
+        .status,
+    ).toBe(401);
+  });
+
+  /**
+   * الرفض وحده لا يكفي: عائلة حيّة تعني تجديداً ناجحاً برمز يحمل الدور
+   * الجديد — أي أن الترقية تمرّ بعد خطوة واحدة إضافية.
+   */
+  it('تغيّر الدور يُبطل عائلات الجلسات كلها فلا ينفع التجديد', async () => {
+    const s = await newSession();
+    await db.update(users).set({ role: Role.ADMIN }).where(eq(users.id, s.userId));
+
+    // أول طلب يكشف التغيّر ويُبطل
+    expect(await meStatus(s.access)).toBe(401);
+
+    // ثم لا يُجدَّد: لا طريق إلى رمز أدمن إلا الدخول من مسار الإدارة
+    await request(http).post('/api/v1/auth/refresh').send({ refreshToken: s.refresh }).expect(401);
+  });
+
+  /** الخفض كذلك: تغيّر الدور حدث يُنهي الجلسة في الاتجاهين */
+  it('خفض الدور يُنهي الجلسة أيضاً', async () => {
+    const s = await newSession();
+    await db.update(users).set({ role: Role.ADMIN }).where(eq(users.id, s.userId));
+    await meStatus(s.access); // يُبطل
+
+    const login = await request(http)
+      .post('/api/v1/auth/login')
+      .send({ phone: s.phone, password: 'Passw0rd#2026' });
+    // الأدمن لا يدخل من مسار الهاتف إطلاقاً — الترقية أغلقت هذا الباب أيضاً
+    expect(login.status).toBe(401);
   });
 
   it('إبطال جلسة جهاز لا يمسّ أجهزة الحساب الأخرى', async () => {
