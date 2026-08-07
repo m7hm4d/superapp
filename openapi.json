@@ -1,0 +1,681 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "SuperApp API — عقد تطبيقات الهاتف",
+    "version": "0.1.0",
+    "description": "مولَّد من مخططات Zod في packages/shared. لا يُحرَّر يدوياً — عدّل المخطط وأعد التوليد."
+  },
+  "servers": [
+    {
+      "url": "/api/v1"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "BatchStop": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "orderCode": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          },
+          "addressText": {
+            "type": "string"
+          },
+          "landmark": {
+            "type": "string",
+            "nullable": true
+          },
+          "lat": {
+            "type": "number"
+          },
+          "lng": {
+            "type": "number"
+          },
+          "totalIqd": {
+            "type": "integer"
+          },
+          "contactPhoneMasked": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "orderId",
+          "orderCode",
+          "sequence",
+          "status",
+          "addressText",
+          "lat",
+          "lng",
+          "totalIqd",
+          "contactPhoneMasked"
+        ],
+        "additionalProperties": false
+      },
+      "DriverBatchStop": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "orderCode": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          },
+          "addressText": {
+            "type": "string"
+          },
+          "landmark": {
+            "type": "string",
+            "nullable": true
+          },
+          "lat": {
+            "type": "number"
+          },
+          "lng": {
+            "type": "number"
+          },
+          "totalIqd": {
+            "type": "integer"
+          },
+          "contactPhoneMasked": {
+            "type": "string"
+          },
+          "deliveredAt": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "orderId",
+          "orderCode",
+          "sequence",
+          "status",
+          "addressText",
+          "lat",
+          "lng",
+          "totalIqd",
+          "contactPhoneMasked",
+          "deliveredAt"
+        ],
+        "additionalProperties": false
+      },
+      "Batch": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          },
+          "vendorNameAr": {
+            "type": "string"
+          },
+          "vendorLat": {
+            "type": "number"
+          },
+          "vendorLng": {
+            "type": "number"
+          },
+          "vendorAddressText": {
+            "type": "string"
+          },
+          "ordersCount": {
+            "type": "integer"
+          },
+          "totalFeeIqd": {
+            "type": "integer"
+          },
+          "totalCashIqd": {
+            "type": "integer"
+          },
+          "offerExpiresAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "stops": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BatchStop"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "vendorNameAr",
+          "vendorLat",
+          "vendorLng",
+          "vendorAddressText",
+          "ordersCount",
+          "totalFeeIqd",
+          "totalCashIqd",
+          "stops"
+        ],
+        "additionalProperties": false
+      },
+      "DriverBatch": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          },
+          "vendorNameAr": {
+            "type": "string"
+          },
+          "vendorLat": {
+            "type": "number"
+          },
+          "vendorLng": {
+            "type": "number"
+          },
+          "vendorAddressText": {
+            "type": "string"
+          },
+          "ordersCount": {
+            "type": "integer"
+          },
+          "totalFeeIqd": {
+            "type": "integer"
+          },
+          "totalCashIqd": {
+            "type": "integer"
+          },
+          "offerExpiresAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "stops": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DriverBatchStop"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "vendorNameAr",
+          "vendorLat",
+          "vendorLng",
+          "vendorAddressText",
+          "ordersCount",
+          "totalFeeIqd",
+          "totalCashIqd",
+          "stops"
+        ],
+        "additionalProperties": false
+      },
+      "DriverLedger": {
+        "type": "object",
+        "properties": {
+          "todayDeliveredCount": {
+            "type": "integer"
+          },
+          "todayFeesIqd": {
+            "type": "integer"
+          },
+          "cashOnHandIqd": {
+            "type": "integer"
+          },
+          "owed": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "vendorId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "vendorNameAr": {
+                  "type": "string"
+                },
+                "amountIqd": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "vendorId",
+                "vendorNameAr",
+                "amountIqd"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "settlements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Settlement"
+            }
+          }
+        },
+        "required": [
+          "todayDeliveredCount",
+          "todayFeesIqd",
+          "cashOnHandIqd",
+          "owed",
+          "settlements"
+        ],
+        "additionalProperties": false
+      },
+      "Settlement": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "vendorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "vendorNameAr": {
+            "type": "string"
+          },
+          "driverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "driverName": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "amountIqd": {
+            "type": "integer"
+          },
+          "orderIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "settlementPin": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "settledAt": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "vendorId",
+          "vendorNameAr",
+          "driverId",
+          "driverName",
+          "status",
+          "amountIqd",
+          "orderIds",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "InitiateSettlementRequest": {
+        "type": "object",
+        "properties": {
+          "vendorId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "vendorId"
+        ],
+        "additionalProperties": false
+      },
+      "ConfirmPickupRequest": {
+        "type": "object",
+        "properties": {
+          "pin": {
+            "type": "string",
+            "pattern": "^\\d{4}$"
+          }
+        },
+        "required": [
+          "pin"
+        ],
+        "additionalProperties": false
+      },
+      "ConfirmDeliveryRequest": {
+        "type": "object",
+        "properties": {
+          "pin": {
+            "type": "string",
+            "pattern": "^\\d{4}$"
+          },
+          "cashCollectedIqd": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "pin",
+          "cashCollectedIqd"
+        ],
+        "additionalProperties": false
+      },
+      "ReportExceptionRequest": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "customer_unavailable",
+              "address_unclear",
+              "customer_refused",
+              "cash_discrepancy",
+              "other"
+            ]
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "additionalProperties": false
+      },
+      "SetAvailabilityRequest": {
+        "type": "object",
+        "properties": {
+          "isAvailable": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "isAvailable"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "paths": {
+    "/driver/batches/available": {
+      "get": {
+        "summary": "العروض المتاحة",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "نجاح",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DriverBatch"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/driver/batches/active": {
+      "get": {
+        "summary": "الدفعة النشطة أو لا شيء",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "قد تكون فارغة",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DriverBatch"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/driver/batches/{id}/claim": {
+      "post": {
+        "summary": "قبول دفعة (ذرّي)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "نجاح",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DriverBatch"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/driver/batches/{id}/confirm-pickup": {
+      "post": {
+        "summary": "تأكيد الاستلام من المخبز",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmPickupRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "نجاح",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DriverBatch"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/driver/orders/{orderId}/deliver": {
+      "post": {
+        "summary": "تسليم طلب وتحصيل نقده",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmDeliveryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "نجاح",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/driver/orders/{orderId}/exception": {
+      "post": {
+        "summary": "تسجيل تعذّر تسليم",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportExceptionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "نجاح",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/driver/ledger": {
+      "get": {
+        "summary": "دفتر السائق المالي",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "نجاح",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DriverLedger"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/driver/settlements": {
+      "post": {
+        "summary": "بدء تسوية — الاستجابة تحمل settlementPin ليعرضه السائق للمخبز",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InitiateSettlementRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "نجاح",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Settlement"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/driver/availability": {
+      "patch": {
+        "summary": "الاتصال للعمل",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetAvailabilityRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "نجاح",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

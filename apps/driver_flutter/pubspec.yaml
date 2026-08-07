@@ -1,0 +1,28 @@
+name: superapp_driver
+description: تطبيق السائق — منصة التوصيل المحلي
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # الحالة: بسيط وصريح، بلا توليد كود
+  flutter_riverpod: ^2.6.1
+  # الشبكة والتخزين الآمن
+  dio: ^5.7.0
+  flutter_secure_storage: ^9.2.2
+  # عربية وRTL
+  intl: ^0.20.2
+  flutter_localizations:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true

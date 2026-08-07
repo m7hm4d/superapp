@@ -3,7 +3,9 @@
     "target": "ES2022",
     "module": "commonjs",
     "moduleResolution": "node",
-    "lib": ["ES2022"],
+    "lib": [
+      "ES2022"
+    ],
     "strict": true,
     "strictPropertyInitialization": false,
     "experimentalDecorators": true,
@@ -16,10 +18,19 @@
     "outDir": "./dist",
     "baseUrl": ".",
     "paths": {
-      "@superapp/shared": ["../../packages/shared/src/index.ts"],
-      "@superapp/shared/*": ["../../packages/shared/src/*"]
+      "@superapp/shared": [
+        "../../packages/shared/src/index.ts"
+      ],
+      "@superapp/shared/*": [
+        "../../packages/shared/src/*"
+      ]
     },
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src", "test", "../../packages/shared/src"]
+  "include": [
+    "src",
+    "test",
+    "../../packages/shared/src",
+    "scripts"
+  ]
 }

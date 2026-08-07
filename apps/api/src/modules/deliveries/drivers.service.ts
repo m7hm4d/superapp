@@ -14,7 +14,7 @@ import {
   OrderStatus,
   Role,
 } from '@superapp/shared';
-import type { BatchStopView, BatchView, LatLng } from '@superapp/shared';
+import type { DriverBatchView, LatLng } from '@superapp/shared';
 import { and, asc, eq, gt, inArray, isNull, notExists, sql } from 'drizzle-orm';
 import { PinGuardService } from '../../common/pin-guard.service';
 import { DB, DbClient } from '../../db/drizzle.module';
@@ -35,14 +35,12 @@ import { LedgerService } from '../ledger/ledger.service';
 import { OrdersService } from '../orders/orders.service';
 import { maskPhone } from './phone-mask';
 
-/** توقف الدفعة كما يراه السائق: BatchStopView + وقت التسليم */
-export interface DriverBatchStop extends BatchStopView {
-  deliveredAt: string | null;
-}
-
-export interface DriverBatchView extends BatchView {
-  stops: DriverBatchStop[];
-}
+/**
+ * يُعاد تصديرهما من `@superapp/shared` لا يُعرَّفان هنا: التعريف المحلي
+ * ينحرف عن العقد المشترك بلا أن يشتكي المصرّف، ومن ذلك العقد تُولَّد
+ * نماذج Dart لتطبيقات الهاتف.
+ */
+export type { DriverBatchStop, DriverBatchView } from '@superapp/shared';
 
 /** الدفعة الحية كما يراها المخبز: رمز الاستلام + السائق + أكواد الطلبات */
 export interface VendorActiveBatchView {

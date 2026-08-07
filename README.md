@@ -362,6 +362,24 @@ docker compose -f docker-compose.prod.yml -f docker-compose.build.yml --env-file
 pnpm exec eas build --platform android
 ```
 
+## عقد تطبيقات الهاتف
+
+مخططات Zod في `packages/shared` هي **مصدر الحقيقة الوحيد**: الخادم يتحقق بها،
+وTypeScript يشتقّ أنواعه منها (`z.infer`)، ومنها يُولَّد `openapi.json` ثم نماذج
+Dart لتطبيقات Flutter.
+
+```bash
+pnpm --filter @superapp/api gen:contract
+```
+
+يكتب `openapi.json` و`apps/driver_flutter/lib/core/generated_models.dart`.
+**الناتج لا يُحرَّر يدوياً** — عدّل المخطط وأعد التوليد.
+
+> **لماذا هذا موجود**: قبله كانت الاستجابات واجهات TypeScript تُمحى عند
+> التصريف، ونماذج Dart منسوخة بيد. تعديل حقل في الخادم لا يكسر أي بناء —
+> ينكسر وقت التشغيل على هاتف السائق. الآن أي تعديل بلا إعادة توليد **يُسقط
+> فحص `contract` في CI**.
+
 ## ملاحظات مونوريبو مهمة
 
 - ‏`node-linker=hoisted` في `.npmrc` ضروري لتوافق Metro.
