@@ -74,6 +74,11 @@ jobs:
       - name: API e2e tests + coverage
         run: pnpm --filter @superapp/api test:coverage
 
+      # اختبارات الحزم المشتركة: بلا هذه الخطوة لم تكن تُشغَّل في CI إطلاقاً
+      # — وحدة api-client يستعملها التطبيقات الأربعة كلها.
+      - name: Shared package tests
+        run: pnpm --filter "./packages/**" test
+
       - name: Build admin dashboard
         run: pnpm --filter @superapp/admin build
 
@@ -86,6 +91,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # قبل التنصيب: لا يحتاج شيئاً وينتهي في أقل من ثانية. تعبير GitHub
+      # داخل run: يُلصق نصّاً في السكربت قبل تشغيله، واسم الوسم يختاره من
+      # يستطيع إنشاء وسم — فحص ساكن أوثق من الانتباه في كل مراجعة.
+      - name: Check workflows for expression injection
+        run: python3 scripts/check-workflow-injection.py
 
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
@@ -180,10 +191,11 @@ jobs:
               -e 's|^ADMIN_IMAGE=.*|ADMIN_IMAGE=superapp-admin:latest|' \
               .env.prod.example > .env.prod
 
-      # الحزمة تنضم إلى شبكة الحافة المشتركة — تُنشأ مرة على الخادم، وهنا
-      # في كل تشغيل.
-      - name: Create the shared edge network
-        run: docker network create superapp-edge
+      # شبكة حافة **لكل حزمة** لا واحدة مشتركة: بشبكة واحدة تصل حاوية
+      # التجربة مباشرة إلى prod-api بلا مرور بـCaddy. الاسم يتبع STACK_NAME،
+      # وهو هنا `ci`. تُنشأ مرة على الخادم، وفي كل تشغيل هنا.
+      - name: Create the stack edge network
+        run: docker network create "superapp-edge-${STACK_NAME}"
 
       - name: Validate Caddyfile
         run: |
@@ -198,6 +210,20 @@ jobs:
 
       - name: Validate compose file
         run: docker compose -f docker-compose.prod.yml --env-file .env.prod config --quiet
+
+      # عودة الحزمتين إلى شبكة واحدة تعيد الانتقال الجانبي من التجربة إلى
+      # الإنتاج بلا أن يسقط أي فحص آخر — الفصل يجب أن يُقاس لا أن يُفترض.
+      - name: The two stacks must not share an edge network
+        run: |
+          net() {
+            STACK_NAME="$1" docker compose -f docker-compose.prod.yml --env-file .env.prod config \
+              | grep -o 'superapp-edge-[a-z0-9_-]*' | head -1
+          }
+          prod=$(net prod)
+          stage=$(net stage)
+          echo "prod=$prod stage=$stage"
+          [ -n "$prod" ] && [ -n "$stage" ] || { echo 'تعذّر قراءة اسم شبكة الحافة' >&2; exit 1; }
+          [ "$prod" != "$stage" ] || { echo 'الحزمتان على شبكة الحافة نفسها' >&2; exit 1; }
 
       - name: Build production images
         run: docker compose -f docker-compose.prod.yml -f docker-compose.build.yml --env-file .env.prod build

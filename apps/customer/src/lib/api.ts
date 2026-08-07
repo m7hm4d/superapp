@@ -11,6 +11,9 @@ export const api = createApiClient({
   baseUrl: BASE_URL,
   storage: expoSecureStorage(),
   onUnauthorized: () => useAuthStore.getState().setLoggedOut(),
+  // ‏__DEV__ ثابت يستبدله Metro وقت البناء: نسخة الإصدار تصير `false`
+  // فيُرفض أي عنوان غير https قبل أول طلب.
+  allowInsecureHttp: __DEV__,
 });
 
 /** استخراج code من ApiError دون افتراضات على نوع الخطأ */

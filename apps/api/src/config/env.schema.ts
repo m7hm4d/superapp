@@ -1,5 +1,11 @@
 import { z } from 'zod';
 
+/**
+ * مصدر واحد للأصول المسموحة: يقرأه `main.ts` عبر ConfigService، ويقرأه
+ * `RealtimeGateway` من البيئة مباشرة لأن مزخرِف الصنف يُقيَّم قبل الحقن.
+ */
+export const DEFAULT_CORS_ORIGINS = 'http://localhost:3001';
+
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().default(3000),
@@ -8,7 +14,7 @@ export const envSchema = z.object({
   JWT_ACCESS_TTL: z.string().default('15m'),
   JWT_REFRESH_SECRET: z.string().min(16),
   JWT_REFRESH_TTL: z.string().default('30d'),
-  CORS_ORIGINS: z.string().default('http://localhost:3001'),
+  CORS_ORIGINS: z.string().default(DEFAULT_CORS_ORIGINS),
   /**
    * عدد الوكلاء العكسيين الموثوقين أمام الـAPI — 0 يعني اتصالاً مباشراً.
    * ‏Caddy وحده = 1. يُضبط أعلى فقط إن أُضيف وكيل آخر أمامه (‏Cloudflare مثلاً).
