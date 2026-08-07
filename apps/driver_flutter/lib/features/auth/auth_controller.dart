@@ -36,7 +36,8 @@ class AuthState {
 
 final apiProvider = Provider<ApiClient>((ref) {
   final client = ApiClient(
-    baseUrl: apiUrl,
+    // يرمي عند الإقلاع لو بُنيت نسخة إصدار بعنوان غير مشفَّر
+    baseUrl: validateApiUrl(apiUrl),
     storage: const TokenStorage(FlutterSecureStorage()),
     onUnauthorized: () => ref.read(authProvider.notifier).signedOut(),
   );
@@ -86,9 +87,27 @@ class AuthController extends StateNotifier<AuthState> {
     await hydrate();
   }
 
+  /// الخروج يُبطل الجلسة على الخادم لا على الجهاز فقط.
+  ///
+  /// حذف الرموز محلياً يوهم بانتهاء الجلسة ولا يُنهيها: رمز التجديد يعيش
+  /// ثلاثين يوماً، ومن نسخه قبل الخروج يظل يصنع جلسات جديدة طوال المدة.
+  /// `auth/logout` يُبطل عائلة التجديد كاملةً.
+  ///
+  /// والمسح في `finally`: انقطاع الشبكة يجب ألّا يحبس المستخدم داخل
+  /// التطبيق — يخرج محلياً، ويبقى الرمز صالحاً حتى انتهائه وهو أهون من
+  /// جلسة مفتوحة على جهاز يريد صاحبها تركه.
   Future<void> logout() async {
-    await _api.storage.clear();
-    state = const AuthState(status: AuthStatus.guest);
+    try {
+      final refresh = await _api.storage.refresh;
+      if (refresh != null) {
+        await _api.post<dynamic>('auth/logout', body: {'refreshToken': refresh});
+      }
+    } catch (_) {
+      // الخروج المحلي يتم على أي حال
+    } finally {
+      await _api.storage.clear();
+      state = const AuthState(status: AuthStatus.guest);
+    }
   }
 
   void signedOut() => state = const AuthState(status: AuthStatus.guest);
