@@ -120,6 +120,19 @@ export class TokenService {
       throw new ForbiddenException({ code: 'BLOCKED' });
     }
 
+    // تغيّر الدور منذ إصدار العائلة يُنهي الجلسة هنا أيضاً.
+    //
+    // هذا المسار **عام** لا يمرّ بحارس المصادقة، فكان يصدر رمزاً بالدور
+    // الحالي: حساب زبون رُقّي في القاعدة يحصل على رمز أدمن كامل بلا مصادقة
+    // إدارة ولا عامل ثانٍ. قِيس على بيئة التجربة — وفتح مساراً إدارياً بـ200.
+    //
+    // المقارنة بدور **إصدار العائلة** لا بما في الرمز: الرمز مبهم لنا هنا،
+    // والعمود لا يُزوَّر.
+    if (row.issuedRole !== user.role) {
+      await this.revokeAllForUser(user.id, 'role changed');
+      throw new UnauthorizedException({ code: 'SESSION_REVOKED' });
+    }
+
     try {
       const pair = await this.db.transaction(async (tx) => {
         const revoked = await tx
@@ -170,6 +183,23 @@ export class TokenService {
     return { ok: true };
   }
 
+  /**
+   * يُبطل كل جلسات المستخدم — لتغيّر الدور وما شابهه ممّا يخصّ الحساب لا
+   * جهازاً بعينه. يبثّ لكل عائلة كي تُقطع اتصالاتها القائمة.
+   */
+  async revokeAllForUser(userId: string, reason: string): Promise<number> {
+    const revoked = await this.db
+      .update(refreshTokens)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(refreshTokens.userId, userId), isNull(refreshTokens.revokedAt)))
+      .returning({ familyId: refreshTokens.familyId });
+
+    for (const familyId of new Set(revoked.map((r) => r.familyId))) {
+      this.emitter.emit('session.revoked', { userId, familyId, reason });
+    }
+    return revoked.length;
+  }
+
   async revokeFamily(familyId: string): Promise<void> {
     const revoked = await this.db
       .update(refreshTokens)
@@ -214,6 +244,8 @@ export class TokenService {
     const [inserted] = await executor
       .insert(refreshTokens)
       .values({
+        // دور الإصدار يُثبَّت مع العائلة لا يُقرأ من الحساب عند كل تدوير
+        issuedRole: user.role,
         userId: user.id,
         tokenHash: sha256(refreshToken),
         familyId,

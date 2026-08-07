@@ -43,6 +43,13 @@
       "when": 1786096619971,
       "tag": "0005_chief_psynapse",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786128706121,
+      "tag": "0006_open_vulture",
+      "breakpoints": true
     }
   ]
 }

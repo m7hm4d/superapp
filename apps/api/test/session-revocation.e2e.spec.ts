@@ -128,6 +128,37 @@ describe('REST session revocation is immediate', () => {
     await request(http).post('/api/v1/auth/refresh').send({ refreshToken: s.refresh }).expect(401);
   });
 
+  /**
+   * انحدار: التجديد المباشر يتجاوز الحارس.
+   *
+   * `auth/refresh` مسار **عام** لا يمرّ بحارس المصادقة، فكان الإبطال رهناً
+   * بمرور الرمز على REST أولاً. ومن استدعى التجديد مباشرة بعد تغيير دوره
+   * حصل على رمز بالدور الجديد: قِيس على بيئة التجربة الحيّة — رمز أدمن
+   * كامل، وفتح `admin/auth-events` بـ200، بلا مصادقة إدارة ولا عامل ثانٍ.
+   */
+  it('التجديد المباشر بعد تغيير الدور — بلا أي طلب REST قبله — يُرفض', async () => {
+    const s = await newSession();
+    await db.update(users).set({ role: Role.ADMIN }).where(eq(users.id, s.userId));
+
+    // لا `auth/me` ولا غيره: أول ما يُلمس هو التجديد
+    const res = await request(http).post('/api/v1/auth/refresh').send({ refreshToken: s.refresh });
+    expect(res.status).toBe(401);
+    expect(res.body.code).toBe('SESSION_REVOKED');
+
+    // ولا رمز جديد في الجسم يمكن استعماله
+    expect(res.body.tokens).toBeUndefined();
+  });
+
+  /** والعائلة تسقط كلها، فلا محاولة ثانية تنفع */
+  it('التجديد المرفوض يُبطل العائلات فلا ينفع الرمز القديم بعده', async () => {
+    const s = await newSession();
+    await db.update(users).set({ role: Role.ADMIN }).where(eq(users.id, s.userId));
+
+    await request(http).post('/api/v1/auth/refresh').send({ refreshToken: s.refresh }).expect(401);
+    await request(http).post('/api/v1/auth/refresh').send({ refreshToken: s.refresh }).expect(401);
+    expect(await meStatus(s.access)).toBe(401);
+  });
+
   /** الخفض كذلك: تغيّر الدور حدث يُنهي الجلسة في الاتجاهين */
   it('خفض الدور يُنهي الجلسة أيضاً', async () => {
     const s = await newSession();

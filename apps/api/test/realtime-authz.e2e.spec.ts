@@ -233,6 +233,37 @@ describe('realtime handshake authorization', () => {
     expect(await waitForDisconnect(socket!)).toBe(true);
   }, 20_000);
 
+  /**
+   * انحدار: البوابة كانت تأخذ الدور من القاعدة لا تقارنه، فرمزٌ صدر لزبون
+   * يدخل غرفة الإدارة بمجرد ترقية صفّه — بلا مصادقة إدارة ولا عامل ثانٍ.
+   */
+  it('إعادة الاتصال برمز قديم بعد تغيير الدور تُرفض', async () => {
+    const userId = await makeUser(Role.CUSTOMER);
+    const token = await accessTokenFor(userId, Role.CUSTOMER);
+    expect(await connect(token)).not.toBeNull();
+
+    await db.update(users).set({ role: Role.ADMIN }).where(eq(users.id, userId));
+
+    // الرمز نفسه، والدور فيه ما زال customer بينما القاعدة تقول admin
+    expect(await connect(token)).toBeNull();
+  });
+
+  /**
+   * والاتصال **القائم** وقت التغيير: لا يمرّ به طلب فلا يكشفه شيء، فيبقى
+   * في غرفته بدوره القديم. الكنس الدوري يغلق هذه الفجوة.
+   */
+  it('اتصال قائم يُقطع عند تغيّر الدور', async () => {
+    const userId = await makeUser(Role.CUSTOMER);
+    const socket = await connect(await accessTokenFor(userId, Role.CUSTOMER));
+    expect(socket).not.toBeNull();
+
+    await db.update(users).set({ role: Role.ADMIN }).where(eq(users.id, userId));
+
+    // استدعاء مباشر بدل انتظار الدورة الكاملة (ثلاثون ثانية)
+    await (gateway as unknown as { dropStaleRoles(): Promise<void> }).dropStaleRoles();
+    expect(await waitForDisconnect(socket!)).toBe(true);
+  }, 20_000);
+
   it('التوكن المحدود النطاق ليس جلسة', async () => {
     const userId = await makeUser(Role.ADMIN);
     const scoped = await jwt.signAsync(
