@@ -48,7 +48,7 @@
 	# لا سكربتات ولا موارد خارجية في الصفحة — فالسياسة تمنعها كلها
 	header Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 	encode zstd gzip
-	root * /srv/site
+	root * /srv/deploy/site
 	file_server
 }
 
