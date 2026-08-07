@@ -42,7 +42,12 @@ export const zLogin = z.object({
 export type LoginInput = z.infer<typeof zLogin>;
 
 export const zRefresh = z.object({
-  refreshToken: z.string().min(20),
+  /**
+   * الحدّ الأعلى قبل التحقق التشفيري لا بعده: بلا سقف يدخل نصٌّ مهما طال
+   * إلى فكّ JWT، فيصير المسار مضخّة عمل مجانية. رمزنا نحو 300 محرف،
+   * والسقف واسع لكل زيادة معقولة في الحمولة.
+   */
+  refreshToken: z.string().min(20).max(1024),
 });
 
 export const zAdminLogin = z.object({

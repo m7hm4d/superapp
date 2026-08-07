@@ -9,6 +9,7 @@ import {
 import type { z } from 'zod';
 import { authContextFrom } from '../../common/auth-context';
 import { AuthThrottle } from '../../common/auth-throttle';
+import { RefreshThrottle } from '../../common/refresh-throttle';
 import {
   CurrentUser,
   Public,
@@ -44,6 +45,7 @@ export class AuthController {
   }
 
   @Public()
+  @RefreshThrottle()
   @HttpCode(200)
   @Post('refresh')
   refresh(@Body(new ZodValidationPipe(zRefresh)) body: RefreshInput) {
