@@ -8,7 +8,7 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { ApprovalStatus, Role, SocketRooms, UserStatus } from '@superapp/shared';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { Server, Socket } from 'socket.io';
 import { DEFAULT_CORS_ORIGINS } from '../config/env.schema';
 import { DB, DbClient } from '../db/drizzle.module';
@@ -111,7 +111,13 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
         .where(eq(users.id, payload.sub))
         .limit(1);
       if (!user || user.status !== UserStatus.ACTIVE) throw new Error('user not active');
-      // الدور من القاعدة أيضاً: خفض رتبة أدمن يجب أن يسري على اتصال جديد
+
+      // الدور يُقارَن لا يُؤخذ.
+      //
+      // أخذُه من القاعدة كان يعني أن رمزاً صدر لزبون يدخل غرفة الإدارة بمجرد
+      // ترقية صفّه — بلا مصادقة إدارة ولا عامل ثانٍ. تغيّر الدور يُنهي الجلسة
+      // ولا يُطبَّق على اتصال برمز قديم.
+      if (user.role !== payload.role) throw new Error('role changed');
       const role = user.role;
 
       const data: SocketAuthData = {
@@ -245,6 +251,35 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       for (const socket of [...sockets]) {
         const data = socket.data as SocketAuthData;
         if (data.expiresAtMs > 0 && data.expiresAtMs <= now) socket.disconnect(true);
+      }
+    }
+    void this.dropStaleRoles();
+  }
+
+  /**
+   * يُسقط اتصالاً تغيّر دور صاحبه أو حُظر بعد مصافحته.
+   *
+   * الإبطال في المسارات الأخرى يقع عند مرور طلب، واتصال صامت لا يمرّ به
+   * شيء: من يفتح التطبيق ويتركه يبقى في غرفته بدوره القديم إلى أجل غير
+   * مسمّى. الكنس يغلق هذه الفجوة خلال دورة واحدة.
+   */
+  private async dropStaleRoles(): Promise<void> {
+    const ids = [...this.byUser.keys()];
+    if (ids.length === 0) return;
+    const rows = await this.db
+      .select({ id: users.id, role: users.role, status: users.status })
+      .from(users)
+      .where(inArray(users.id, ids));
+    const live = new Map(rows.map((r) => [r.id, r]));
+
+    for (const [userId, sockets] of this.byUser) {
+      const row = live.get(userId);
+      for (const socket of [...sockets]) {
+        const data = socket.data as SocketAuthData;
+        if (!row || row.status !== UserStatus.ACTIVE || row.role !== data.role) {
+          this.logger.log(`socket dropped: user=${userId} reason=stale role/status`);
+          socket.disconnect(true);
+        }
       }
     }
   }

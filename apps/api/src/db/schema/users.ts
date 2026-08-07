@@ -28,6 +28,18 @@ export const refreshTokens = pgTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     tokenHash: text('token_hash').notNull().unique(), // sha256
     familyId: uuid('family_id').notNull(), // سلالة التدوير — كشف إعادة الاستخدام
+    /**
+     * الدور الذي صدرت به العائلة.
+     *
+     * ‏`auth/refresh` مسار عام لا يمرّ بحارس المصادقة، فكان يصدر رمزاً بالدور
+     * **الحالي** من القاعدة: حساب زبون رُقّي إلى أدمن يحصل على رمز أدمن كامل
+     * بلا مصادقة إدارة ولا عامل ثانٍ — قِيس على بيئة التجربة وفتح مساراً
+     * إدارياً بـ200.
+     *
+     * بمقارنة هذا العمود بالدور الحالي يُكشف التغيّر عند التجديد نفسه، فلا
+     * يبقى الكشف رهناً بمرور الرمز على REST أولاً.
+     */
+    issuedRole: text('issued_role').notNull(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
     replacedById: uuid('replaced_by_id'),
