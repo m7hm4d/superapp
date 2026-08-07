@@ -5,3 +5,4 @@ export type { TokenStorage } from './storage';
 export { createSocket } from './socket';
 export type { Socket, CreateSocketOptions } from './socket';
 export { uuid } from './uuid';
+export { assertUsableApiUrl, InsecureApiUrlError } from './url';

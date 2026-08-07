@@ -74,6 +74,11 @@ jobs:
       - name: API e2e tests + coverage
         run: pnpm --filter @superapp/api test:coverage
 
+      # اختبارات الحزم المشتركة: بلا هذه الخطوة لم تكن تُشغَّل في CI إطلاقاً
+      # — وحدة api-client يستعملها التطبيقات الأربعة كلها.
+      - name: Shared package tests
+        run: pnpm --filter "./packages/**" test
+
       - name: Build admin dashboard
         run: pnpm --filter @superapp/admin build
 
@@ -86,6 +91,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # قبل التنصيب: لا يحتاج شيئاً وينتهي في أقل من ثانية. تعبير GitHub
+      # داخل run: يُلصق نصّاً في السكربت قبل تشغيله، واسم الوسم يختاره من
+      # يستطيع إنشاء وسم — فحص ساكن أوثق من الانتباه في كل مراجعة.
+      - name: Check workflows for expression injection
+        run: python3 scripts/check-workflow-injection.py
 
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:

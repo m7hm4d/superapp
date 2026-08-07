@@ -9,4 +9,7 @@ export const client = createApiClient({
   baseUrl: API_URL,
   storage,
   onUnauthorized: () => useAuthStore.getState().setLoggedOut(),
+  // ‏__DEV__ ثابت يستبدله Metro وقت البناء: نسخة الإصدار تصير `false`
+  // فيُرفض أي عنوان غير https قبل أول طلب.
+  allowInsecureHttp: __DEV__,
 });

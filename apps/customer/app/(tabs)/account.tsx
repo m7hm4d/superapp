@@ -15,7 +15,9 @@ export default function AccountScreen() {
   const authStatus = useAuthStore((s) => s.status);
 
   const logout = async () => {
-    await api.storage.clear();
+    // ‏api.logout يُبطل الجلسة على الخادم ثم يمسح المخزن — المسح وحده
+    // كان يترك رمز التحديث صالحاً بعد «الخروج».
+    await api.logout();
     useAuthStore.getState().setLoggedOut();
   };
 

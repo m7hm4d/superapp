@@ -104,13 +104,20 @@ jobs:
 
       # التحقق فوراً في نفس التشغيل: توقيع لا يمكن التحقق منه أسوأ من لا
       # توقيع، لأنه يمنح ثقة لا أساس لها.
+      # ‏WORKFLOW_REF وREPOSITORY عبر البيئة لا بالتوسعة المباشرة: اسم الوسم
+      # يختاره من يستطيع إنشاء وسم، و`git check-ref-format` يقبل
+      # `refs/tags/v$(id)`. توسعة GitHub تضع النص داخل سكربت الصدفة **قبل**
+      # تشغيله، فيصير `$()` أمراً يُنفَّذ على runner يملك packages:write
+      # وid-token:write. عبر البيئة يبقى نصاً لا يُعاد تقييمه.
       - name: Verify the signature we just made
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
           IMAGE: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+          REPOSITORY: ${{ github.repository }}
+          WORKFLOW_REF: ${{ github.ref }}
         run: |
           cosign verify \
-            --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/publish.yml@${{ github.ref }}" \
+            --certificate-identity "https://github.com/${REPOSITORY}/.github/workflows/publish.yml@${WORKFLOW_REF}" \
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
             "${IMAGE}@${DIGEST}" > /dev/null
           echo "signature verified for ${IMAGE}@${DIGEST}"
@@ -119,15 +126,18 @@ jobs:
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
           IMAGE: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+          IMAGE_NAME: ${{ matrix.image }}
+          # مشتق من اسم الوسم عبر metadata-action — ملوَّث مثله تماماً
+          TAGS: ${{ steps.meta.outputs.tags }}
         run: |
           {
-            echo "### ${{ matrix.image }}"
+            echo "### ${IMAGE_NAME}"
             echo ''
             echo '```'
             echo "${IMAGE}@${DIGEST}"
             echo '```'
             echo ''
-            echo "tags: ${{ steps.meta.outputs.tags }}"
+            echo "tags: ${TAGS}"
           } >> "$GITHUB_STEP_SUMMARY"
 
   # إصدار GitHub يُنشأ **بعد** نجاح النشر والتوقيع، لا قبله: إصدار يشير إلى
@@ -150,22 +160,24 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
+          OWNER: ${{ github.repository_owner }}
+          REPOSITORY: ${{ github.repository }}
         run: |
           {
             echo '## الصور'
             echo
             echo '```'
-            echo "ghcr.io/${{ github.repository_owner }}/superapp-api:${TAG}"
-            echo "ghcr.io/${{ github.repository_owner }}/superapp-admin:${TAG}"
+            echo "ghcr.io/${OWNER}/superapp-api:${TAG}"
+            echo "ghcr.io/${OWNER}/superapp-admin:${TAG}"
             echo '```'
             echo
             echo 'موقَّعة بـcosign بلا مفاتيح. التحقق:'
             echo
             echo '```bash'
             echo "cosign verify \\"
-            echo "  --certificate-identity-regexp '^https://github.com/${{ github.repository }}/\\.github/workflows/publish\\.yml@refs/(heads/main|tags/v.+)\$' \\"
+            echo "  --certificate-identity-regexp '^https://github.com/${REPOSITORY}/\\.github/workflows/publish\\.yml@refs/(heads/main|tags/v.+)\$' \\"
             echo "  --certificate-oidc-issuer https://token.actions.githubusercontent.com \\"
-            echo "  ghcr.io/${{ github.repository_owner }}/superapp-api:${TAG}"
+            echo "  ghcr.io/${OWNER}/superapp-api:${TAG}"
             echo '```'
             echo
             echo '## النشر'
