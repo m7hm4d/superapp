@@ -22,6 +22,7 @@ import {
 import { and, desc, eq, gte, lte, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import { DB, type DbClient } from '../../db/drizzle.module';
+import { ExceptionQueriesService } from '../deliveries/exception-queries.service';
 import {
   batchOrders,
   batches,
@@ -92,6 +93,7 @@ export type ResolveSettlementInput = z.infer<typeof zResolveSettlement>;
 export class OpsService {
   constructor(
     @Inject(DB) private readonly db: DbClient,
+    private readonly exceptionQueries: ExceptionQueriesService,
     private readonly ordersService: OrdersService,
     private readonly ledgerService: LedgerService,
     private readonly emitter: EventEmitter2,
@@ -208,42 +210,9 @@ export class OpsService {
 
   // ---------- الاستثناءات ----------
 
-  async listExceptions(q: AdminExceptionsQuery) {
-    const where = eq(exceptions.status, q.status);
-
-    const [items, countRows] = await Promise.all([
-      this.db
-        .select({
-          id: exceptions.id,
-          type: exceptions.type,
-          status: exceptions.status,
-          note: exceptions.note,
-          orderId: exceptions.orderId,
-          orderCode: orders.code,
-          orderStatus: orders.status,
-          vendorId: orders.vendorId,
-          vendorStoreNameAr: vendorProfiles.storeNameAr,
-          batchId: exceptions.batchId,
-          reportedByUserId: exceptions.reportedByUserId,
-          reporterName: users.fullName,
-          ownerAdminId: exceptions.ownerAdminId,
-          decision: exceptions.decision,
-          decisionReason: exceptions.decisionReason,
-          createdAt: exceptions.createdAt,
-          resolvedAt: exceptions.resolvedAt,
-        })
-        .from(exceptions)
-        .leftJoin(orders, eq(orders.id, exceptions.orderId))
-        .leftJoin(vendorProfiles, eq(vendorProfiles.id, orders.vendorId))
-        .leftJoin(users, eq(users.id, exceptions.reportedByUserId))
-        .where(where)
-        .orderBy(desc(exceptions.createdAt))
-        .limit(q.limit)
-        .offset(q.offset),
-      this.db.select({ count: sql<number>`count(*)::int` }).from(exceptions).where(where),
-    ]);
-
-    return { items, total: countRows[0]?.count ?? 0, limit: q.limit, offset: q.offset };
+  /** يفوّض إلى مالك الجدول — `exceptions` ملك `deliveries` لا اللوحة */
+  listExceptions(q: AdminExceptionsQuery) {
+    return this.exceptionQueries.listForAdmin(q);
   }
 
   /**

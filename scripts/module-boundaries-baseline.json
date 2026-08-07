@@ -3,11 +3,6 @@
   "allowed": [
     [
       "admin",
-      "authEvents",
-      "apps/api/src/modules/admin/admin-security.controller.ts"
-    ],
-    [
-      "admin",
       "batchOrders",
       "apps/api/src/modules/admin/admin.service.ts"
     ],
@@ -169,11 +164,6 @@
     [
       "ledger",
       "users",
-      "apps/api/src/modules/ledger/ledger.service.ts"
-    ],
-    [
-      "ledger",
-      "vendorProfiles",
       "apps/api/src/modules/ledger/ledger.service.ts"
     ],
     [

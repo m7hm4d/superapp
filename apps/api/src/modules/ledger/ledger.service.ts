@@ -9,7 +9,9 @@ import { LedgerEntryType, OrderStatus, SettlementStatus } from '@superapp/shared
 import type { LedgerSummaryView } from '@superapp/shared';
 import { and, eq, gte, inArray, lte, sql } from 'drizzle-orm';
 import { DB, DbClient } from '../../db/drizzle.module';
-import { driverProfiles, ledgerEntries, orders, settlements, users, vendorProfiles } from '../../db/schema';
+import { OrderDirectoryService } from '../orders/order-directory.service';
+import { VendorDirectoryService } from '../vendors/vendor-directory.service';
+import { driverProfiles, ledgerEntries, orders, settlements, users } from '../../db/schema';
 
 /** نوع معاملة Drizzle — مطابق بنيوياً لنوع orders.service (استخراج من DbClient نفسه) */
 export type DbTx = Parameters<Parameters<DbClient['transaction']>[0]>[0];
@@ -69,7 +71,11 @@ export function parseOrderIds(raw: string): string[] {
  */
 @Injectable()
 export class LedgerService {
-  constructor(@Inject(DB) private readonly db: DbClient) {}
+  constructor(
+    @Inject(DB) private readonly db: DbClient,
+    private readonly ordersDirectory: OrderDirectoryService,
+    private readonly vendors: VendorDirectoryService,
+  ) {}
 
   // ─────────────────────────── الكتابة داخل معاملات المستدعي ───────────────────────────
 
@@ -154,22 +160,36 @@ export class LedgerService {
     driverId: string,
     executor: DbExecutor = this.db,
   ): Promise<DriverOwedByVendorRow[]> {
-    const rows = await executor
-      .select({
-        orderId: orders.id,
-        vendorId: orders.vendorId,
-        storeNameAr: vendorProfiles.storeNameAr,
-        subtotalIqd: orders.subtotalIqd,
-      })
+    // التصفية على `ledgerEntries` وحده — ملك هذه الوحدة — والانضمامان إثراء.
+    // ثلاثة استعلامات محدودة بقيود هذا السائق بدل انضمام ثلاثي، وضمٌّ في
+    // الذاكرة. لا نداء لكل صف.
+    const entries = await executor
+      .select({ orderId: ledgerEntries.orderId })
       .from(ledgerEntries)
-      .innerJoin(orders, eq(orders.id, ledgerEntries.orderId))
-      .innerJoin(vendorProfiles, eq(vendorProfiles.id, orders.vendorId))
       .where(
         and(
           eq(ledgerEntries.driverId, driverId),
           eq(ledgerEntries.entryType, LedgerEntryType.CASH_COLLECTED),
         ),
       );
+    const ordersById = await this.ordersDirectory.summariesFor(
+      entries.map((e) => e.orderId).filter((id): id is string => id !== null),
+    );
+    const vendorsById = await this.vendors.summariesFor(
+      [...ordersById.values()].map((o) => o.vendorId),
+    );
+    const rows = entries.flatMap((entry) => {
+      const order = entry.orderId ? ordersById.get(entry.orderId) : undefined;
+      if (!order) return [];
+      return [
+        {
+          orderId: order.id,
+          vendorId: order.vendorId,
+          storeNameAr: vendorsById.get(order.vendorId)?.storeNameAr ?? '',
+          subtotalIqd: order.subtotalIqd,
+        },
+      ];
+    });
 
     const settledOrderIds = await this.settledOrderIdsFor({ driverId }, executor);
 

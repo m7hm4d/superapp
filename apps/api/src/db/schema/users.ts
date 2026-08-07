@@ -1,3 +1,4 @@
+import { AUTH_EVENT_OUTCOMES } from '@superapp/shared';
 import { bigint, boolean, index, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { geographyPoint } from './_geo';
 
@@ -102,21 +103,8 @@ export const webauthnChallenges = pgTable(
   (t) => [index('webauthn_challenges_expiry_idx').on(t.expiresAt)],
 );
 
-export const authEventOutcomeEnum = pgEnum('auth_event_outcome', [
-  'success',
-  'invalid_credentials',
-  'unknown_identifier',
-  'totp_required',
-  'totp_invalid',
-  'totp_replayed',
-  'enrollment_required',
-  'enrollment_completed',
-  'blocked',
-  'admin_login_denied', // حساب إداري حاول الدخول من مسار الهاتف
-  'refresh_reuse', // إعادة استخدام refresh token = سرقة مفترضة
-  'logout',
-  'session_revoked',
-]);
+// القيم من @superapp/shared: قائمتان تتباعدان بصمت أسوأ من استيراد واحد
+export const authEventOutcomeEnum = pgEnum('auth_event_outcome', AUTH_EVENT_OUTCOMES);
 
 export const authEventMethodEnum = pgEnum('auth_event_method', [
   'phone_password',
