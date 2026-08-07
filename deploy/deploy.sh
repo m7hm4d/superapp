@@ -54,9 +54,11 @@ command -v cosign >/dev/null 2>&1 || {
 STACK_NAME="$(grep -E '^STACK_NAME=' "$ENV_FILE" | head -1 | cut -d= -f2-)"
 [ -n "$STACK_NAME" ] || { echo "STACK_NAME غير مضبوط في $ENV_FILE" >&2; exit 1; }
 
-docker network inspect superapp-edge >/dev/null 2>&1 || {
-  echo "شبكة superapp-edge غير موجودة. أنشئها مرة واحدة:" >&2
-  echo "  docker network create superapp-edge" >&2
+EDGE_NETWORK="superapp-edge-${STACK_NAME}"
+docker network inspect "$EDGE_NETWORK" >/dev/null 2>&1 || {
+  echo "شبكة $EDGE_NETWORK غير موجودة. أنشئها مرة واحدة:" >&2
+  echo "  docker network create $EDGE_NETWORK" >&2
+  echo "ثم أعد تشغيل حزمة الحافة كي ينضم Caddy إليها." >&2
   exit 1
 }
 

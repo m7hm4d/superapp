@@ -239,7 +239,10 @@ tail -5 .deploy/prod-history.tsv
 ### التهيئة مرة واحدة
 
 ```bash
-docker network create superapp-edge
+# شبكة لكل بيئة لا واحدة مشتركة: بشبكة واحدة تصل حاويات التجربة مباشرة
+# إلى prod-api بلا مرور بـCaddy، وتزوّر X-Forwarded-For على الإنتاج.
+docker network create superapp-edge-prod
+docker network create superapp-edge-stage
 ```
 
 ```bash

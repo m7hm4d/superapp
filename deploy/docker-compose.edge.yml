@@ -1,10 +1,12 @@
 # حافة TLS مشتركة. ‏Caddy واحد على الخادم يخدم البيئتين — لأن 80 و443 لا
 # يمكن أن يربطهما أكثر من عملية، ولأن ACME يحتاجهما فعلاً.
 #
-# الحزمتان (‏prod و stage) تنضمّان إلى شبكة superapp-edge بأسماء مستعارة
-# ‏(prod-api و stage-api …)، وCaddy يوجّه إليها بالاسم.
+# لكل حزمة شبكة حافة خاصة بها، وCaddy وحده ينضم إليهما معاً: حاوية في
+# بيئة التجربة لا تصل إلى `prod-api` إلا عبره. شبكة واحدة مشتركة كانت تتيح
+# الانتقال الجانبي وتزوير X-Forwarded-For على الإنتاج.
 #
-#   docker network create superapp-edge          ← مرة واحدة
+#   docker network create superapp-edge-prod     ← مرة واحدة لكل بيئة
+#   docker network create superapp-edge-stage
 #   docker compose -f deploy/docker-compose.edge.yml --env-file .env.edge up -d
 
 name: superapp-edge
@@ -31,12 +33,16 @@ services:
       # المعدل عند التكرار.
       - caddy_data:/data
       - caddy_config:/config
-    networks: [edge]
+    # الوحيد المنضمّ إلى الشبكتين: أي حركة بين البيئتين يجب أن تمرّ به
+    networks: [edge_prod, edge_stage]
 
 networks:
-  edge:
+  edge_prod:
     external: true
-    name: superapp-edge
+    name: superapp-edge-${PROD_STACK_NAME:-prod}
+  edge_stage:
+    external: true
+    name: superapp-edge-${STAGE_STACK_NAME:-stage}
 
 volumes:
   caddy_data:
