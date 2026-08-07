@@ -3,6 +3,7 @@ import { IBM_Plex_Sans_Arabic } from 'next/font/google';
 import type { ReactNode } from 'react';
 import './globals.css';
 import { Providers } from './providers';
+import { RUNTIME_KEY, serverApiUrl } from '@/lib/runtime-config';
 
 const plexArabic = IBM_Plex_Sans_Arabic({
   subsets: ['arabic', 'latin'],
@@ -19,9 +20,21 @@ export const metadata: Metadata = {
   description: 'لوحة إدارة منصة التوصيل المحلي',
 };
 
+// يُقرأ عند كل طلب لا عند البناء — فتصلح الصورة الواحدة لكل بيئة
+export const dynamic = 'force-dynamic';
+
 export default function RootLayout({ children }: { children: ReactNode }) {
+  const apiUrl = serverApiUrl();
   return (
     <html lang="ar" dir="rtl" className={plexArabic.variable}>
+      <head>
+        {/* حقن قبل أي سكربت تطبيق: العميل يقرأه عند أول استدعاء */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `window[${JSON.stringify(RUNTIME_KEY)}]=${JSON.stringify(apiUrl)}`,
+          }}
+        />
+      </head>
       <body>
         <Providers>{children}</Providers>
       </body>

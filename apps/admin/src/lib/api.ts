@@ -7,10 +7,14 @@ import {
   type UseQueryOptions,
   type UseQueryResult,
 } from '@tanstack/react-query';
+import { apiUrl } from './runtime-config';
 import { enrollmentTokens, localStorageTokens } from './storage';
 
-export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+/**
+ * دالة لا ثابت: القيمة تأتي من الحقن وقت التشغيل، وقراءتها لحظة تحميل
+ * الوحدة تسبق الحقن على الخادم.
+ */
+export const API_BASE_URL = apiUrl();
 
 const USER_KEY = 'sa.admin.user';
 

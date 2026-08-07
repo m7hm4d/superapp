@@ -57,8 +57,9 @@ check "دخول الأدمن بكلمة خاطئة يردّ 401" bash -c "test \
 echo
 echo "اللوحة"
 check "صفحة الدخول تُخدَم" bash -c "curl -fsS --max-time 15 '$ADMIN/login' | grep -q '<title>'"
-# اللوحة تخبز عنوان الـAPI وقت البناء — لو أشارت إلى بيئة أخرى لظهر هنا
-check "اللوحة مبنيّة على عنوان الـAPI الصحيح" bash -c "curl -fsS --max-time 15 '$ADMIN/login' | grep -qF '$(echo "$API" | sed 's|https://||')'"
+# اللوحة تحقن عنوان الـAPI في HTML عند كل طلب. لو أشارت إلى بيئة أخرى —
+# كما حدث فعلاً حين كان العنوان مخبوزاً وقت البناء — لظهر هنا.
+check "اللوحة تشير إلى عنوان الـAPI الصحيح" bash -c "curl -fsS --max-time 15 '$ADMIN/login' | grep -qF '__SUPERAPP_API_URL__\"]=\"$API\"'"
 
 echo
 echo "حدّ المحاولات"
