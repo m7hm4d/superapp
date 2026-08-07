@@ -64,9 +64,29 @@ describe('admin passkeys', () => {
     return { credential, saved: saved.body, options: options.body };
   }
 
-  async function loginWithPasskey(credential: Parameters<typeof signAuthentication>[0]) {
+  /**
+   * الخطوة الأولى: بريد وكلمة مرور فقط. تعيد توكن العامل الثاني — وهو ما
+   * يثبت أن كلمة المرور تحققت، ولا يفتح شيئاً سواه.
+   */
+  async function stepUp(email: string) {
+    const res = await request(http)
+      .post('/api/v1/auth/admin/login')
+      .send({ email, password: PASSWORD })
+      .expect(200);
+    return res.body as {
+      status: string;
+      stepUpToken: string;
+      methods: string[];
+    };
+  }
+
+  async function loginWithPasskey(
+    credential: Parameters<typeof signAuthentication>[0],
+    stepUpToken: string,
+  ) {
     const options = await request(http)
       .post('/api/v1/auth/admin/passkey/login/options')
+      .send({ stepUpToken })
       .expect(200);
     const assertion = signAuthentication(credential, {
       rpId: RP_ID,
@@ -75,7 +95,7 @@ describe('admin passkeys', () => {
     });
     return request(http)
       .post('/api/v1/auth/admin/passkey/login/verify')
-      .send({ response: assertion });
+      .send({ response: assertion, stepUpToken });
   }
 
   beforeAll(async () => {
@@ -91,7 +111,7 @@ describe('admin passkeys', () => {
     await app?.close();
   });
 
-  it('a fresh admin can enroll a passkey instead of TOTP and then log in with it', async () => {
+  it('a fresh admin enrolls a passkey, then uses it as the second factor', async () => {
     const admin = await createAdmin();
 
     // بلا عامل ثانٍ: الدخول يعطي توكن تسجيل محدوداً لا جلسة
@@ -100,27 +120,98 @@ describe('admin passkeys', () => {
       .send({ email: admin.email, password: PASSWORD })
       .expect(200);
     expect(first.body.status).toBe('totp_enrollment_required');
-    const enrollmentToken = first.body.enrollmentToken as string;
 
-    // توكن التسجيل يفتح تسجيل مفتاح المرور (بديلاً عن TOTP)
-    const { credential } = await enrollPasskey(enrollmentToken, 'آيفون 15');
+    const { credential } = await enrollPasskey(first.body.enrollmentToken as string, 'آيفون 15');
 
-    // ثم الدخول بالمفتاح وحده يصدر جلسة إدارية كاملة
-    const login = await loginWithPasskey(credential);
+    // بعد التسجيل: كلمة المرور تعطي خيار عامل ثانٍ لا جلسة
+    const challenge = await stepUp(admin.email);
+    expect(challenge.status).toBe('second_factor_required');
+    expect(challenge.methods).toEqual(['passkey']);
+    expect(challenge.stepUpToken).toBeTruthy();
+    expect(challenge).not.toHaveProperty('tokens');
+
+    const login = await loginWithPasskey(credential, challenge.stepUpToken);
     expect(login.status).toBe(200);
     expect(login.body.user.id).toBe(admin.id);
-    const access = login.body.tokens.accessToken as string;
     await request(http)
       .get('/api/v1/admin/finance/summary')
-      .set('Authorization', `Bearer ${access}`)
+      .set('Authorization', `Bearer ${login.body.tokens.accessToken}`)
       .expect(200);
+  });
 
-    // ولا يُطالَب بعدها بتسجيل TOTP — يُوجَّه إلى مفتاحه
-    const again = await request(http)
+  /**
+   * جوهر التغيير: المفتاح عامل **ثانٍ**. بلا توكن يثبت أن كلمة المرور تحققت،
+   * لا يفتح المفتاح شيئاً — فسرقة جهاز مفتوح بمفتاح متزامن لا تكفي.
+   */
+  it('a passkey alone opens nothing without the password step', async () => {
+    const admin = await createAdmin();
+    const first = await request(http)
       .post('/api/v1/auth/admin/login')
       .send({ email: admin.email, password: PASSWORD })
+      .expect(200);
+    const { credential } = await enrollPasskey(first.body.enrollmentToken as string);
+
+    // بلا توكن أصلاً
+    await request(http).post('/api/v1/auth/admin/passkey/login/options').send({}).expect(400);
+
+    // وبتوكن مختلق
+    const forged = await request(http)
+      .post('/api/v1/auth/admin/passkey/login/options')
+      .send({ stepUpToken: 'not-a-real-token' })
       .expect(401);
-    expect(again.body.code).toBe('USE_PASSKEY');
+    expect(forged.body.code).toBe('STEP_UP_INVALID');
+
+    // وبتوكن تسجيل (نطاق آخر) — لا يصلح لإتمام دخول
+    const wrongScope = await request(http)
+      .post('/api/v1/auth/admin/passkey/login/options')
+      .send({ stepUpToken: first.body.enrollmentToken })
+      .expect(401);
+    expect(wrongScope.body.code).toBe('STEP_UP_INVALID');
+
+    // ومع توكن صحيح يعمل — إثبات أن الرفض سببه غياب الخطوة لا خلل في المفتاح
+    const challenge = await stepUp(admin.email);
+    const ok = await loginWithPasskey(credential, challenge.stepUpToken);
+    expect(ok.status).toBe(200);
+  });
+
+  /** مفتاح حساب آخر لا يُتمّ دخول هذا الحساب ولو كانت كلمة مروره صحيحة */
+  it('refuses a passkey that belongs to a different admin', async () => {
+    const victim = await createAdmin();
+    const attacker = await createAdmin();
+
+    const vFirst = await request(http)
+      .post('/api/v1/auth/admin/login')
+      .send({ email: victim.email, password: PASSWORD })
+      .expect(200);
+    await enrollPasskey(vFirst.body.enrollmentToken as string);
+
+    const aFirst = await request(http)
+      .post('/api/v1/auth/admin/login')
+      .send({ email: attacker.email, password: PASSWORD })
+      .expect(200);
+    const { credential: attackerKey } = await enrollPasskey(aFirst.body.enrollmentToken as string);
+
+    // كلمة مرور الضحية معروفة في الاختبار، لكن المفتاح ليس مفتاحها
+    const victimChallenge = await stepUp(victim.email);
+    const options = await request(http)
+      .post('/api/v1/auth/admin/passkey/login/options')
+      .send({ stepUpToken: victimChallenge.stepUpToken })
+      .expect(200);
+
+    // الخيارات مقصورة على مفاتيح الضحية — مفتاح المهاجم ليس فيها
+    const allowed = (options.body.allowCredentials ?? []) as { id: string }[];
+    expect(allowed.some((c) => c.id === attackerKey.credentialId)).toBe(false);
+
+    const assertion = signAuthentication(attackerKey, {
+      rpId: RP_ID,
+      origin: ORIGIN,
+      challenge: options.body.challenge,
+    });
+    const res = await request(http)
+      .post('/api/v1/auth/admin/passkey/login/verify')
+      .send({ response: assertion, stepUpToken: victimChallenge.stepUpToken });
+    expect(res.status).toBe(401);
+    expect(res.body.code).toBe('PASSKEY_MISMATCH');
   });
 
   it('a challenge is single-use, and a replayed assertion is rejected', async () => {
@@ -130,9 +221,11 @@ describe('admin passkeys', () => {
       .send({ email: admin.email, password: PASSWORD })
       .expect(200);
     const { credential } = await enrollPasskey(first.body.enrollmentToken);
+    const challenge = await stepUp(admin.email);
 
     const options = await request(http)
       .post('/api/v1/auth/admin/passkey/login/options')
+      .send({ stepUpToken: challenge.stepUpToken })
       .expect(200);
     const assertion = signAuthentication(credential, {
       rpId: RP_ID,
@@ -142,14 +235,14 @@ describe('admin passkeys', () => {
 
     const ok = await request(http)
       .post('/api/v1/auth/admin/passkey/login/verify')
-      .send({ response: assertion })
+      .send({ response: assertion, stepUpToken: challenge.stepUpToken })
       .expect(200);
     expect(ok.body.tokens.accessToken).toBeTruthy();
 
     // إعادة إرسال التوقيع نفسه: التحدي استُهلك فلا يُقبل
     const replay = await request(http)
       .post('/api/v1/auth/admin/passkey/login/verify')
-      .send({ response: assertion })
+      .send({ response: assertion, stepUpToken: challenge.stepUpToken })
       .expect(401);
     expect(replay.body.code).toBe('PASSKEY_CHALLENGE_EXPIRED');
   });
@@ -161,10 +254,13 @@ describe('admin passkeys', () => {
       .send({ email: admin.email, password: PASSWORD })
       .expect(200);
     const { credential } = await enrollPasskey(first.body.enrollmentToken);
+    const challenge = await stepUp(admin.email);
 
-    // أصل مختلف — جوهر مقاومة التصيّد
+    // أصل مختلف — جوهر مقاومة التصيّد. كلمة المرور صحيحة والتوكن صحيح،
+    // ومع ذلك يُرفض التوقيع لأنه صدر لنطاق آخر.
     const options = await request(http)
       .post('/api/v1/auth/admin/passkey/login/options')
+      .send({ stepUpToken: challenge.stepUpToken })
       .expect(200);
     const phishing = signAuthentication(credential, {
       rpId: RP_ID,
@@ -173,11 +269,12 @@ describe('admin passkeys', () => {
     });
     const rejected = await request(http)
       .post('/api/v1/auth/admin/passkey/login/verify')
-      .send({ response: phishing })
+      .send({ response: phishing, stepUpToken: challenge.stepUpToken })
       .expect(401);
     expect(rejected.body.code).toBe('PASSKEY_INVALID');
 
     // تحدٍّ لم يصدره الخادم
+    const second = await stepUp(admin.email);
     const forged = signAuthentication(credential, {
       rpId: RP_ID,
       origin: ORIGIN,
@@ -185,14 +282,24 @@ describe('admin passkeys', () => {
     });
     await request(http)
       .post('/api/v1/auth/admin/passkey/login/verify')
-      .send({ response: forged })
+      .send({ response: forged, stepUpToken: second.stepUpToken })
       .expect(401);
   });
 
   it('an unknown credential never yields a session', async () => {
+    const admin = await createAdmin();
+    const first = await request(http)
+      .post('/api/v1/auth/admin/login')
+      .send({ email: admin.email, password: PASSWORD })
+      .expect(200);
+    await enrollPasskey(first.body.enrollmentToken);
+    const challenge = await stepUp(admin.email);
+
     const options = await request(http)
       .post('/api/v1/auth/admin/passkey/login/options')
+      .send({ stepUpToken: challenge.stepUpToken })
       .expect(200);
+    // مفتاح لم يُسجَّل قط، بكلمة مرور صحيحة وتوكن صالح
     const { credential } = createCredential({
       rpId: RP_ID,
       origin: ORIGIN,
@@ -205,7 +312,7 @@ describe('admin passkeys', () => {
     });
     const res = await request(http)
       .post('/api/v1/auth/admin/passkey/login/verify')
-      .send({ response: assertion })
+      .send({ response: assertion, stepUpToken: challenge.stepUpToken })
       .expect(401);
     expect(res.body.code).toBe('PASSKEY_UNKNOWN');
     expect(res.body.tokens).toBeUndefined();
@@ -218,7 +325,8 @@ describe('admin passkeys', () => {
       .send({ email: admin.email, password: PASSWORD })
       .expect(200);
     const { credential } = await enrollPasskey(first.body.enrollmentToken, 'المفتاح الأول');
-    const session = await loginWithPasskey(credential);
+    const challenge = await stepUp(admin.email);
+    const session = await loginWithPasskey(credential, challenge.stepUpToken);
     const access = session.body.tokens.accessToken as string;
 
     const list = await request(http)
@@ -265,9 +373,13 @@ describe('admin passkeys', () => {
       .expect(200);
     expect(viaTotp.body.status).toBe('ok');
 
-    // ثم يضيف مفتاح مرور من جلسته
+    // ثم يضيف مفتاح مرور من جلسته — فيصير للحساب عاملان يختار بينهما
     const { credential } = await enrollPasskey(viaTotp.body.tokens.accessToken, 'ماك');
-    const viaPasskey = await loginWithPasskey(credential);
+
+    const challenge = await stepUp(admin.email);
+    expect(challenge.methods.sort()).toEqual(['passkey', 'totp']);
+
+    const viaPasskey = await loginWithPasskey(credential, challenge.stepUpToken);
     expect(viaPasskey.status).toBe(200);
 
     const rows = await db.select().from(authEvents).where(eq(authEvents.userId, admin.id));

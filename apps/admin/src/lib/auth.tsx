@@ -66,11 +66,18 @@ function getServerSnapshot(): AuthUser | null {
 /** رد الدخول: جلسة كاملة، أو مطالبة بتسجيل جهاز المصادقة قبل أي وصول إداري */
 type AdminLoginResponse =
   | { status: 'ok'; user: AuthUser; tokens: AuthTokens }
-  | { status: 'totp_enrollment_required'; enrollmentToken: string; email: string };
+  | { status: 'totp_enrollment_required'; enrollmentToken: string; email: string }
+  | {
+      status: 'second_factor_required';
+      stepUpToken: string;
+      methods: ('totp' | 'passkey')[];
+      email: string;
+    };
 
 export type LoginOutcome =
   | { kind: 'session'; user: AuthUser }
-  | { kind: 'enrollment'; email: string };
+  | { kind: 'enrollment'; email: string }
+  | { kind: 'second_factor'; stepUpToken: string; methods: ('totp' | 'passkey')[] };
 
 export interface UseAuthResult {
   user: AuthUser | null;
@@ -82,8 +89,8 @@ export interface UseAuthResult {
 
 /**
  * useAuth(): المستخدم الحالي + دخول/خروج.
- * يرمي login خطأ ApiError — code === 'TOTP_REQUIRED' يعني أظهر حقل الرمز،
- * ويعيد kind === 'enrollment' حين يلزم تسجيل جهاز المصادقة أولاً.
+ * يعيد `second_factor` حين تصحّ كلمة المرور ويبقى العامل الثاني، و`enrollment`
+ * حين لا يملك الحساب عاملاً بعد. كلمة المرور وحدها لا تُصدر جلسة أبداً.
  */
 export function useAuth(): UseAuthResult {
   const user = useSyncExternalStore(subscribe, readUser, getServerSnapshot);
@@ -95,6 +102,14 @@ export function useAuth(): UseAuthResult {
       password,
       ...(totp ? { totp } : {}),
     });
+    if (res.status === 'second_factor_required') {
+      // التوكن يبقى في الذاكرة فقط: عمره دقيقتان ولا معنى لبقائه بعد الصفحة
+      return {
+        kind: 'second_factor',
+        stepUpToken: res.stepUpToken,
+        methods: res.methods,
+      } satisfies LoginOutcome;
+    }
     if (res.status === 'totp_enrollment_required') {
       await enrollmentTokens.set({ accessToken: res.enrollmentToken, refreshToken: '' });
       return { kind: 'enrollment', email: res.email } satisfies LoginOutcome;

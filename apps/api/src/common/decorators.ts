@@ -12,11 +12,15 @@ export const SKIP_APPROVAL_KEY = 'skipApproval';
 export const SkipApproval = () => SetMetadata(SKIP_APPROVAL_KEY, true);
 
 /**
- * يقبل توكن تسجيل TOTP المحدود إضافةً إلى توكن الجلسة الكامل.
- * حصراً لمساري إعداد/تفعيل TOTP — أي مسار آخر يرفض التوكن المحدود.
+ * النطاقات المحدودة التي يقبلها هذا المسار **بالاسم**.
+ *
+ * كانت هذه القيمة منطقية (`true`) فكان الحارس يكتفي بوجود `scope` أياً كانت
+ * قيمته. النتيجة أن توكن الخطوة الثانية — الصادر بكلمة المرور وحدها — كان
+ * يفتح مساري تسجيل TOTP ومفتاح المرور، فيسجّل المهاجم عاملاً ثانياً لنفسه
+ * ويحصل على جلسة كاملة. الاسم الصريح يغلق ذلك: لكل نطاق مساراته وحدها.
  */
-export const ALLOW_TOTP_ENROLLMENT_KEY = 'allowTotpEnrollment';
-export const AllowTotpEnrollment = () => SetMetadata(ALLOW_TOTP_ENROLLMENT_KEY, true);
+export const ALLOWED_SCOPES_KEY = 'allowedTokenScopes';
+export const AllowScopes = (...scopes: string[]) => SetMetadata(ALLOWED_SCOPES_KEY, scopes);
 
 export interface RequestUser {
   id: string;

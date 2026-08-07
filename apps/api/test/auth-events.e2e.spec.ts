@@ -103,14 +103,15 @@ describe('auth events and sessions', () => {
     expect(Object.values(latest)).not.toContain('whatever');
   });
 
-  it('records the admin path separately, including the TOTP-less attempt', async () => {
+  it('records the admin path separately, including the step that stopped at the second factor', async () => {
     const { email, password } = await import('./helpers/admin-login').then((m) =>
       m.adminCredentialsFromEnv(),
     );
+    // كلمة المرور صحيحة والدخول لم يكتمل — يُقيَّد كمحاولة توقفت عند العامل الثاني
     await request(http)
       .post('/api/v1/auth/admin/login')
       .send({ email, password })
-      .expect(401);
+      .expect(200);
 
     const rows = await db
       .select()

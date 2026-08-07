@@ -21,6 +21,15 @@ export const TOTP_ENROLLMENT_SCOPE = 'admin_totp_enrollment';
 /** مهلة قصيرة — التسجيل يتم في جلسة واحدة أمام تطبيق المصادقة */
 const ENROLLMENT_TTL_SEC = 15 * 60;
 
+/**
+ * نطاق توكن العامل الثاني: يُصدر بعد التحقق من كلمة المرور وحدها، ولا يفتح
+ * شيئاً سوى إتمام الدخول بمفتاح مرور. حارس JWT يرفض أي توكن يحمل `scope`
+ * كجلسة، فلا يصلح هذا للوصول إلى أي مسار إداري.
+ */
+export const ADMIN_STEP_UP_SCOPE = 'admin_step_up';
+/** دقيقتان: زمن اختيار عامل وإتمامه، لا أكثر */
+const STEP_UP_TTL_SEC = 2 * 60;
+
 const TOTP_ISSUER = 'SuperApp Admin';
 
 export interface AdminSession {
@@ -37,12 +46,32 @@ export interface AdminEnrollmentRequired {
   email: string;
 }
 
-export type AdminLoginResult = AdminSession | AdminEnrollmentRequired;
+/** عوامل التأكيد المتاحة لهذا الحساب */
+export type AdminSecondFactor = 'totp' | 'passkey';
+
+export interface AdminSecondFactorRequired {
+  status: 'second_factor_required';
+  /** توكن قصير يثبت أن كلمة المرور تحققت — يلزم لإتمام الدخول بمفتاح المرور */
+  stepUpToken: string;
+  expiresInSec: number;
+  /** ما يملكه هذا الحساب فعلاً — الواجهة تعرض ما هو متاح لا ما هو ممكن */
+  methods: AdminSecondFactor[];
+  email: string;
+}
+
+export type AdminLoginResult =
+  | AdminSession
+  | AdminEnrollmentRequired
+  | AdminSecondFactorRequired;
 
 /**
- * دخول الإدارة مستقل عن تدفق الهاتف: بريد + كلمة مرور قوية + TOTP (الملف §3).
- * TOTP إلزامي: من لم يسجّل بعدُ لا يحصل على جلسة إدارية، بل على توكن تسجيل
- * محدود يفتح مساري الإعداد والتفعيل فقط.
+ * دخول الإدارة مستقل عن تدفق الهاتف: بريد + كلمة مرور قوية + عامل ثانٍ.
+ *
+ * العامل الثاني يختاره الأدمن: رمز TOTP أو مفتاح مرور. كلاهما يأتي **بعد**
+ * كلمة المرور لا بدلاً منها — فمفتاح متزامن على جهاز مسروق مفتوح لا يكفي
+ * وحده لدخول لوحة الإدارة، ويبقى عامل «ما تعرفه» شرطاً.
+ *
+ * ومن لم يسجّل عاملاً بعدُ لا يحصل على جلسة، بل على توكن تسجيل محدود.
  */
 @Injectable()
 export class AdminAuthService {
@@ -85,15 +114,12 @@ export class AdminAuthService {
       throw new UnauthorizedException({ code: 'INVALID_CREDENTIALS' });
     }
 
-    // TOTP إلزامي — لا جلسة إدارية بعامل واحد.
-    // من سجّل مفتاح مرور فقد استوفى العامل الثاني بمسار أقوى، فيدخل منه
-    // لا من هنا؛ ولا يُطالَب بتسجيل TOTP إضافي.
-    if (!row.cred.totpEnabled || !row.cred.totpSecret) {
-      const passkeyCount = await this.passkeys.countFor(row.user.id);
-      if (passkeyCount > 0) {
-        await this.events.record({ ...event, userId: row.user.id, outcome: 'totp_required' });
-        throw new UnauthorizedException({ code: 'USE_PASSKEY' });
-      }
+    // كلمة المرور وحدها لا تفتح شيئاً. ما تملكه هذه الحساب من عوامل يحدّد
+    // الخطوة التالية: تسجيل عامل أول مرة، أو اختيار عامل لإتمام الدخول.
+    const hasTotp = row.cred.totpEnabled && Boolean(row.cred.totpSecret);
+    const passkeyCount = await this.passkeys.countFor(row.user.id);
+
+    if (!hasTotp && passkeyCount === 0) {
       await this.events.record({ ...event, userId: row.user.id, outcome: 'enrollment_required' });
       return {
         status: 'totp_enrollment_required',
@@ -103,11 +129,27 @@ export class AdminAuthService {
       };
     }
 
-    if (!input.totp) {
+    // رمز TOTP مُرسل مع كلمة المرور: مسار مباشر بلا خطوة وسيطة
+    if (input.totp) {
+      if (!hasTotp) {
+        await this.events.record({ ...event, userId: row.user.id, outcome: 'totp_required' });
+        throw new UnauthorizedException({ code: 'TOTP_NOT_ENABLED' });
+      }
+      await this.consumeTotp(row.user.id, row.cred.totpSecret!, input.totp, event);
+    } else {
+      // بلا رمز: تُعرَض العوامل المتاحة مع توكن يثبت أن كلمة المرور تحققت
+      const methods: AdminSecondFactor[] = [];
+      if (hasTotp) methods.push('totp');
+      if (passkeyCount > 0) methods.push('passkey');
       await this.events.record({ ...event, userId: row.user.id, outcome: 'totp_required' });
-      throw new UnauthorizedException({ code: 'TOTP_REQUIRED' });
+      return {
+        status: 'second_factor_required',
+        stepUpToken: await this.issueStepUpToken(row.user.id),
+        expiresInSec: STEP_UP_TTL_SEC,
+        methods,
+        email: row.cred.email,
+      };
     }
-    await this.consumeTotp(row.user.id, row.cred.totpSecret, input.totp, event);
 
     const tokens = await this.tokens.issuePairWithFamily(row.user);
     await this.events.record({
@@ -212,6 +254,35 @@ export class AdminAuthService {
       .limit(1);
     if (!cred) throw new ForbiddenException({ code: 'NO_ADMIN_CREDENTIALS' });
     return { enabled: cred.enabled, pending: cred.pending !== null };
+  }
+
+  private async issueStepUpToken(userId: string): Promise<string> {
+    return this.jwt.signAsync(
+      { sub: userId, role: Role.ADMIN, scope: ADMIN_STEP_UP_SCOPE },
+      {
+        secret: this.config.getOrThrow<string>('JWT_ACCESS_SECRET'),
+        expiresIn: STEP_UP_TTL_SEC,
+      },
+    );
+  }
+
+  /**
+   * يفكّ توكن العامل الثاني ويعيد صاحبه. النطاق يُفحص صراحةً: توكن تسجيل
+   * أو جلسة كاملة لا يصلح لإتمام دخول — ولا العكس.
+   */
+  async userIdFromStepUpToken(token: string): Promise<string> {
+    let payload: { sub?: unknown; scope?: unknown };
+    try {
+      payload = await this.jwt.verifyAsync(token, {
+        secret: this.config.getOrThrow<string>('JWT_ACCESS_SECRET'),
+      });
+    } catch {
+      throw new UnauthorizedException({ code: 'STEP_UP_INVALID' });
+    }
+    if (payload.scope !== ADMIN_STEP_UP_SCOPE || typeof payload.sub !== 'string') {
+      throw new UnauthorizedException({ code: 'STEP_UP_INVALID' });
+    }
+    return payload.sub;
   }
 
   private async issueEnrollmentToken(userId: string): Promise<string> {
