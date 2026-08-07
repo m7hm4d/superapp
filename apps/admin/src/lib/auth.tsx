@@ -126,7 +126,10 @@ export function useAuth(): UseAuthResult {
   }, []);
 
   const logout = useCallback(async () => {
-    await localStorageTokens.clear();
+    // ‏api.logout يُبطل عائلة رموز التحديث على الخادم ثم يمسح المخزن.
+    // كان المسح محلياً فقط، ورمز تحديث اللوحة يعيش ثلاثين يوماً — فمن
+    // نسخه من متصفح مشترك يبقى داخل حساب إدارة بعد «الخروج».
+    await api.logout();
     await enrollmentTokens.clear();
     writeUser(null);
     router.replace('/login');

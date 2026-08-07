@@ -82,10 +82,14 @@ export const api: ApiClient = {
 
 export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
 
-/** تسجيل خروج يدوي: مسح التوكنات ثم تحويل الحالة إلى ضيف */
+/**
+ * تسجيل خروج يدوي: إبطال الجلسة على الخادم ثم تحويل الحالة إلى ضيف.
+ *
+ * كان يمسح التوكنات محلياً فقط، فيبقى رمز التحديث صالحاً على الخادم.
+ */
 export async function logout(): Promise<void> {
   try {
-    await storage.clear();
+    await api.logout();
   } finally {
     useApprovalStore.getState().clear();
     authStore.getState().setLoggedOut();

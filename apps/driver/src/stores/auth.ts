@@ -60,8 +60,13 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 }));
 
-/** تسجيل الخروج: مسح الرموز ثم إسقاط الجلسة (حارس التوجيه يعيد لشاشة الدخول) */
+/**
+ * تسجيل الخروج: إبطال الجلسة على الخادم ثم إسقاطها محلياً
+ * (حارس التوجيه يعيد لشاشة الدخول).
+ *
+ * كان المسح محلياً فقط، فيبقى رمز التحديث صالحاً على الخادم بعد «الخروج».
+ */
 export async function logout(): Promise<void> {
-  await storage.clear();
+  await client.logout();
   useAuthStore.getState().setLoggedOut();
 }

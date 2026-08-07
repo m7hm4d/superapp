@@ -205,6 +205,37 @@ describe('auth events and sessions', () => {
     expect(revokedEvent.length).toBe(1);
   });
 
+  /**
+   * ما يهم ليس أن يُسجَّل الخروج بل أن **يموت رمز التحديث**. العميل كان
+   * يمسح المخزن محلياً بلا استدعاء هذا المسار أصلاً، فبقيت العائلة حيّة
+   * ثلاثين يوماً بعد «الخروج» — ولم يكن هنا ما يكشف ذلك.
+   */
+  it('logout actually kills the refresh family', async () => {
+    const login = await request(http)
+      .post('/api/v1/auth/login')
+      .send({ phone: customerPhone, password: CUSTOMER_PASSWORD })
+      .expect(200);
+
+    // تدوير مرة: الخروج يجب أن يقتل **العائلة** لا الرمز المُرسَل وحده
+    const rotated = await request(http)
+      .post('/api/v1/auth/refresh')
+      .send({ refreshToken: login.body.tokens.refreshToken })
+      .expect(200);
+    const { accessToken, refreshToken } = rotated.body.tokens;
+
+    await request(http)
+      .post('/api/v1/auth/logout')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ refreshToken })
+      .expect(200);
+
+    await request(http).post('/api/v1/auth/refresh').send({ refreshToken }).expect(401);
+    await request(http)
+      .post('/api/v1/auth/refresh')
+      .send({ refreshToken: login.body.tokens.refreshToken })
+      .expect(401);
+  });
+
   it('logout is recorded and rbac keeps the log admin-only', async () => {
     const login = await request(http)
       .post('/api/v1/auth/login')

@@ -41,6 +41,17 @@ export interface ApiClient {
    * مخصص لاتصال الـ socket (مرره كـ getToken في createSocket).
    */
   getFreshAccessToken(): Promise<string | null>;
+  /**
+   * خروج يُبطل الجلسة على **الخادم** ثم يمسح المخزن محلياً.
+   *
+   * مسح المخزن وحده لا يُبطل شيئاً: رمز التحديث يبقى صالحاً حتى انتهائه
+   * (ثلاثون يوماً للوحة الإدارة)، فمن نسخه من جهاز مشترك أو نسخة احتياطية
+   * يبقى داخل الحساب بعد «الخروج» — والمستخدم يظنّ نفسه خرج.
+   *
+   * الإبطال أفضل جهد: انقطاع الشبكة لا يجوز أن يحبس أحداً داخل جلسة،
+   * فالمسح المحلي يقع في كل الأحوال.
+   */
+  logout(): Promise<void>;
   readonly baseUrl: string;
   readonly storage: TokenStorage;
 }
@@ -261,10 +272,30 @@ export function createApiClient(opts: CreateApiClientOptions): ApiClient {
     return data as T;
   }
 
+  async function logout(): Promise<void> {
+    try {
+      // توكن وصول صالح أولاً: المسار يتطلب مصادقة، ولولا ذلك لانتهى بـ401
+      // فيُمسح المخزن محلياً وتبقى العائلة حيّة على الخادم — وهو العطل عينه.
+      // وقراءة رمز التحديث **بعد** التجديد كي يحمل الجسم الرمز الحيّ.
+      await getFreshAccessToken();
+      const refreshToken = await storage.getRefresh();
+      if (refreshToken) {
+        await request<unknown>('POST', 'auth/logout', undefined, { refreshToken });
+      }
+    } catch {
+      // متروك عمداً: الفشل هنا لا يمنع الخروج المحلي.
+    } finally {
+      // بلا onUnauthorized: معناه «سقطت الجلسة فجأة» لا «خرج المستخدم عمداً»،
+      // واللوحة تعلّق عليه تنقلاً كاملاً للصفحة. كل تطبيق يعيد حالته بنفسه.
+      await storage.clear();
+    }
+  }
+
   return {
     baseUrl,
     storage,
     getFreshAccessToken,
+    logout,
     get<T>(path: string, query?: Record<string, unknown>): Promise<T> {
       return request<T>('GET', path, query);
     },

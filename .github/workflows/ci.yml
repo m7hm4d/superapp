@@ -74,6 +74,11 @@ jobs:
       - name: API e2e tests + coverage
         run: pnpm --filter @superapp/api test:coverage
 
+      # اختبارات الحزم المشتركة: بلا هذه الخطوة لم تكن تُشغَّل في CI إطلاقاً
+      # — وحدة api-client يستعملها التطبيقات الأربعة كلها.
+      - name: Shared package tests
+        run: pnpm --filter "./packages/**" test
+
       - name: Build admin dashboard
         run: pnpm --filter @superapp/admin build
 

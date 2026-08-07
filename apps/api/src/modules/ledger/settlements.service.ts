@@ -17,6 +17,7 @@ import type { LedgerSummaryView, SettlementView } from '@superapp/shared';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import { generatePin } from '../../common/codes';
+import { PinGuardService } from '../../common/pin-guard.service';
 import { DB, DbClient } from '../../db/drizzle.module';
 import { driverProfiles, settlements, users, vendorProfiles } from '../../db/schema';
 import type { SettlementUpdatedDomainEvent } from '../../realtime/events.publisher';
@@ -62,6 +63,7 @@ export class SettlementsService {
     @Inject(DB) private readonly db: DbClient,
     private readonly ledger: LedgerService,
     private readonly emitter: EventEmitter2,
+    private readonly pinGuard: PinGuardService,
   ) {}
 
   // ─────────────────────────────── مسار السائق ───────────────────────────────
@@ -182,9 +184,13 @@ export class SettlementsService {
           to: SettlementStatus.SETTLED,
         });
       }
-      if (row.settlementPin !== pin) {
-        throw new ForbiddenException({ code: 'WRONG_PIN' });
-      }
+      await this.pinGuard.verify({
+        targetType: 'settlement',
+        targetId: settlementId,
+        expected: row.settlementPin,
+        provided: pin,
+        actorUserId: vendorUserId,
+      });
       await tx
         .update(settlements)
         .set({ status: SettlementStatus.SETTLED, settledAt: new Date() })
