@@ -1,5 +1,5 @@
 import type { TokenStorage } from './storage';
-import { stripLeadingSlashes, stripTrailingSlashes } from './url';
+import { assertUsableApiUrl, stripLeadingSlashes, stripTrailingSlashes } from './url';
 import { uuid } from './uuid';
 
 /** خطأ API موحّد: {code, message?, requestId} من الباكند. */
@@ -29,6 +29,11 @@ export interface CreateApiClientOptions {
   baseUrl: string;
   storage: TokenStorage;
   onUnauthorized?: () => void;
+  /**
+   * السماح بـ`http://` — يمرّره التطبيق من إشارة التطوير عنده (`__DEV__`
+   * في إكسبو، `NODE_ENV` في اللوحة). افتراضه `false` فيفشل مغلقاً.
+   */
+  allowInsecureHttp?: boolean;
 }
 
 export interface ApiClient {
@@ -132,7 +137,11 @@ function toApiError(status: number, body: unknown, fallbackRequestId?: string): 
 }
 
 export function createApiClient(opts: CreateApiClientOptions): ApiClient {
-  const { baseUrl, storage, onUnauthorized } = opts;
+  const { baseUrl, storage, onUnauthorized, allowInsecureHttp = false } = opts;
+
+  // عند الإنشاء لا عند أول طلب: العطل يظهر وقت الإقلاع لا بعد أن يكتب
+  // المستخدم كلمة مروره.
+  assertUsableApiUrl(baseUrl, allowInsecureHttp);
 
   /** وعد تجديد واحد مشترك بين كل طلبات 401 المتزامنة. */
   let refreshPromise: Promise<boolean> | null = null;

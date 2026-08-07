@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApiClient } from '../src/client';
+import { InsecureApiUrlError } from '../src/url';
 import { memoryStorage } from '../src/storage';
 
 /**
@@ -114,5 +115,49 @@ describe('client.logout revokes the session server-side', () => {
     const [logoutUrl, logoutInit] = fetchMock.mock.calls[1] as [string, RequestInit];
     expect(logoutUrl).toBe('https://api.test/api/v1/auth/logout');
     expect(JSON.parse(logoutInit.body as string)).toEqual({ refreshToken: 'refresh-1' });
+  });
+});
+
+/**
+ * انحدار: نسخة إصدار بعنوان غير مشفَّر.
+ *
+ * تطبيقات إكسبو الثلاثة تقرأ `EXPO_PUBLIC_API_URL` وتسقط إلى
+ * `http://localhost:3000` افتراضاً، ولم يكن شيء يمنع بناء نسخة إنتاج بعنوان
+ * ‏HTTP بعيد: كلمة المرور ورمزا الوصول والتجديد تُرسل على الشبكة بلا تشفير،
+ * ولا شيء في التطبيق يُظهر ذلك. تطبيق فلاتر حصل على هذه الحماية، وهذه هي
+ * نفسها في الحزمة المشتركة فتغطي الأربعة.
+ */
+describe('createApiClient يرفض العناوين غير المشفَّرة', () => {
+  const storage = memoryStorage();
+
+  it('يرفض HTTP بعيداً في الإصدار — قبل أي طلب', () => {
+    expect(() =>
+      createApiClient({ baseUrl: 'http://api.example.com', storage }),
+    ).toThrow(InsecureApiUrlError);
+  });
+
+  it('يرفض حتى localhost في الإصدار', () => {
+    expect(() => createApiClient({ baseUrl: 'http://localhost:3000', storage })).toThrow(
+      InsecureApiUrlError,
+    );
+  });
+
+  it('يقبل HTTPS دائماً', () => {
+    expect(() => createApiClient({ baseUrl: 'https://api.example.com', storage })).not.toThrow();
+  });
+
+  /** الاختبار على جهاز حقيقي يمرّ بعنوان الشبكة المحلية — حظره يدفع لتعطيل الفحص */
+  it('يقبل HTTP في التطوير على أي مضيف', () => {
+    for (const url of ['http://localhost:3000', 'http://192.168.1.5:3000', 'http://10.0.2.2:3000']) {
+      expect(() =>
+        createApiClient({ baseUrl: url, storage, allowInsecureHttp: true }),
+      ).not.toThrow();
+    }
+  });
+
+  it('يرفض ما ليس عنواناً أصلاً', () => {
+    expect(() => createApiClient({ baseUrl: 'api.example.com', storage })).toThrow(
+      InsecureApiUrlError,
+    );
   });
 });

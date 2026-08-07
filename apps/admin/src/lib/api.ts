@@ -19,12 +19,23 @@ export const API_BASE_URL = apiUrl();
 const USER_KEY = 'sa.admin.user';
 
 /**
+ * ‏HTTP مسموح في التطوير، وكذلك على الخادم وأثناء البناء.
+ *
+ * العنوان يُحقن وقت التشغيل، وقيمته أثناء `next build` مجرد نائب
+ * (`http://localhost:3000`) لا يمرّ به أي طلب — فرض الفحص هناك يُسقط البناء
+ * بلا فائدة. ما يهمّ هو المتصفح: هناك تُرسل كلمة المرور ورمز التجديد.
+ */
+const ALLOW_INSECURE_HTTP =
+  process.env.NODE_ENV !== 'production' || typeof window === 'undefined';
+
+/**
  * عميل API وحيد للوحة: يضيف /api/v1 وAuthorization وx-idempotency-key
  * ويجدد التوكن مرة واحدة عند 401 — عند الفشل النهائي يعيد إلى /login.
  */
 export const api = createApiClient({
   baseUrl: API_BASE_URL,
   storage: localStorageTokens,
+  allowInsecureHttp: ALLOW_INSECURE_HTTP,
   onUnauthorized: () => {
     if (typeof window === 'undefined') return;
     try {
@@ -45,6 +56,7 @@ export const api = createApiClient({
 export const enrollApi = createApiClient({
   baseUrl: API_BASE_URL,
   storage: enrollmentTokens,
+  allowInsecureHttp: ALLOW_INSECURE_HTTP,
 });
 
 export { ApiError };

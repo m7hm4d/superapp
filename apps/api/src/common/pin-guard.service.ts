@@ -1,6 +1,6 @@
 import { ForbiddenException, Inject, Injectable, Logger } from '@nestjs/common';
 import { and, eq, sql } from 'drizzle-orm';
-import { DB, DbClient } from '../db/drizzle.module';
+import { DbClient, PIN_GUARD_DB } from '../db/drizzle.module';
 import { pinAttempts } from '../db/schema';
 
 /** نوع الهدف الذي يحمي رمزه */
@@ -21,6 +21,14 @@ const FREE_ATTEMPTS = 3;
 const BASE_LOCK_MS = 30_000;
 const MAX_LOCK_MS = 60 * 60_000;
 
+/**
+ * حدّ انتظار القفل الاستشاري: طلب مرفوض أهون من طلب معلّق إلى الأبد.
+ *
+ * ثابت في الشيفرة لا مُدخَل — و`SET LOCAL` لا يقبل معاملاً مربوطاً أصلاً
+ * (‏`SET LOCAL lock_timeout = $1` خطأ صياغة يرميه الخادم)، فيُبنى نصّاً.
+ */
+const LOCK_TIMEOUT_SQL = "SET LOCAL lock_timeout = '5s'";
+
 function lockDuration(failedCount: number): number {
   // ‏FREE_ATTEMPTS محاولة **مسموحة** بلا قفل، والقفل يبدأ بما بعدها.
   // بلا الطرح الإضافي كان القفل يقع عند المحاولة الثالثة لا الرابعة —
@@ -29,6 +37,12 @@ function lockDuration(failedCount: number): number {
   if (over < 0) return 0;
   return Math.min(BASE_LOCK_MS * 4 ** over, MAX_LOCK_MS);
 }
+
+/** النتيجة تُحسب داخل المعاملة ويُرمى عليها بعد الالتزام */
+type Verdict =
+  | { kind: 'ok' }
+  | { kind: 'locked'; retryAfterSec: number }
+  | { kind: 'wrong'; attempt: number; lockedUntil: Date | null };
 
 /**
  * حارس رموز PIN.
@@ -43,19 +57,29 @@ function lockDuration(failedCount: number): number {
 export class PinGuardService {
   private readonly logger = new Logger(PinGuardService.name);
 
-  constructor(@Inject(DB) private readonly db: DbClient) {}
+  /**
+   * مسبح مستقل — لا `DB`. الحارس يُستدعى داخل معاملات المُستدعي، ومشاركة
+   * المسبح تجمّد الخدمة كلها عند التزامن. التفصيل عند `PIN_GUARD_DB`.
+   */
+  constructor(@Inject(PIN_GUARD_DB) private readonly db: DbClient) {}
 
   /**
    * يتحقق من الرمز مع حماية التخمين.
    *
-   * يُستدعى **قبل** أي كتابة: القفل يجب أن يمنع المحاولة لا أن يُسجَّل
-   * بعد نجاحها.
+   * ثلاثة قيود تحكم البنية هنا، وكلٌّ منها يُسقط الحماية إن أُهمل:
    *
-   * ملاحظة جوهرية: يكتب على `this.db` لا على معاملة المُستدعي — عمداً.
-   * ‏confirmPickup وconfirm للتسوية يستدعيانه **داخل** معاملة، ورمي الاستثناء
-   * يُلغيها. لو كُتب العدّاد داخلها لتراجع معها، فلا يُحتسب إخفاق قط: حماية
-   * قائمة في الشيفرة لا تعدّ شيئاً في الواقع. من يمرّر `tx` إلى هنا «تنظيفاً»
-   * يُلغي الحماية كلها بصمت — واختبار «العدّاد ينجو من تراجع المعاملة» يمسكه.
+   * ١. **قفل استشاري لكل هدف.** القراءة والمقارنة والزيادة وقرار القفل
+   *    لا بد أن تتسلسل. بلا ذلك تقرأ المحاولات المتزامنة العدّاد نفسه
+   *    فتكتب `lockedUntil` محسوباً من قيمة قديمة — وقد قِيس ذلك: أربع
+   *    محاولات متزامنة تركت **٢٠ هدفاً من ٢٠ بلا قفل** رغم بلوغ العدّاد
+   *    أربعة. زيادة ذرّية لا تكفي ما دام القرار غير ذرّي.
+   *
+   * ٢. **الرمي بعد الالتزام.** `confirmPickup` وتأكيد التسوية يستدعيان
+   *    الحارس داخل معاملة يُلغيها الاستثناء. لو رُمي داخل معاملة الحارس
+   *    لتراجع العدّاد معها فلا يُحتسب إخفاق قط.
+   *
+   * ٣. **فحص القفل قبل المقارنة.** الرمز الصحيح لا يمرّ أثناء القفل،
+   *    وإلا صار القفل بلا أثر على من يخمّن حتى يصيب.
    */
   async verify(opts: {
     targetType: PinTarget;
@@ -66,69 +90,84 @@ export class PinGuardService {
   }): Promise<void> {
     const { targetType, targetId, expected, provided, actorUserId } = opts;
 
-    const [row] = await this.db
-      .select()
-      .from(pinAttempts)
-      .where(and(eq(pinAttempts.targetType, targetType), eq(pinAttempts.targetId, targetId)))
-      .limit(1);
-
-    const now = new Date();
-    if (row?.lockedUntil && row.lockedUntil > now) {
-      const retryAfterSec = Math.ceil((row.lockedUntil.getTime() - now.getTime()) / 1000);
-      this.logger.warn(
-        `pin locked: ${targetType}/${targetId} actor=${actorUserId ?? '?'} retryAfter=${retryAfterSec}s`,
+    const verdict = await this.db.transaction(async (tx): Promise<Verdict> => {
+      await tx.execute(sql.raw(LOCK_TIMEOUT_SQL));
+      // القفل على الهدف وحده: أهداف مختلفة لا تتزاحم، ويُحرَّر مع المعاملة
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${targetType}:${targetId}`}::text, 0))`,
       );
-      throw new ForbiddenException({ code: 'PIN_LOCKED', retryAfterSec });
-    }
 
-    // المقارنة بعد فحص القفل — رمز صحيح أثناء القفل لا يمرّ أيضاً، وإلا
-    // صار القفل بلا أثر على من يخمّن حتى يصيب.
-    if (provided === expected) {
-      if (row) await this.reset(targetType, targetId);
-      return;
-    }
+      const [row] = await tx
+        .select()
+        .from(pinAttempts)
+        .where(and(eq(pinAttempts.targetType, targetType), eq(pinAttempts.targetId, targetId)))
+        .limit(1);
 
-    const failed = (row?.failedCount ?? 0) + 1;
-    const lockMs = lockDuration(failed);
-    const lockedUntil = lockMs > 0 ? new Date(now.getTime() + lockMs) : null;
+      const now = new Date();
+      if (row?.lockedUntil && row.lockedUntil > now) {
+        return {
+          kind: 'locked',
+          retryAfterSec: Math.ceil((row.lockedUntil.getTime() - now.getTime()) / 1000),
+        };
+      }
 
-    await this.db
-      .insert(pinAttempts)
-      .values({
-        targetType,
-        targetId,
-        failedCount: failed,
-        lockedUntil,
-        lastFailedAt: now,
-        lastActorUserId: actorUserId ?? null,
-        updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: [pinAttempts.targetType, pinAttempts.targetId],
-        set: {
-          // الزيادة في SQL لا في الشيفرة: محاولتان متزامنتان تُحتسبان
-          // كلتاهما بدل أن تكتب إحداهما فوق الأخرى.
-          failedCount: sql`${pinAttempts.failedCount} + 1`,
+      if (provided === expected) {
+        // لا داعي لإبقاء سجل بعد إتمام العملية
+        if (row) {
+          await tx
+            .delete(pinAttempts)
+            .where(and(eq(pinAttempts.targetType, targetType), eq(pinAttempts.targetId, targetId)));
+        }
+        return { kind: 'ok' };
+      }
+
+      // القفل الاستشاري يجعل هذه القراءة نهائية، فتُكتب القيمة صراحةً
+      // ويُحسب القفل منها هي لا من قراءة سبقتها.
+      const failed = (row?.failedCount ?? 0) + 1;
+      const lockMs = lockDuration(failed);
+      const lockedUntil = lockMs > 0 ? new Date(now.getTime() + lockMs) : null;
+
+      await tx
+        .insert(pinAttempts)
+        .values({
+          targetType,
+          targetId,
+          failedCount: failed,
           lockedUntil,
           lastFailedAt: now,
           lastActorUserId: actorUserId ?? null,
           updatedAt: now,
-        },
-      });
+        })
+        .onConflictDoUpdate({
+          target: [pinAttempts.targetType, pinAttempts.targetId],
+          set: {
+            failedCount: failed,
+            lockedUntil,
+            lastFailedAt: now,
+            lastActorUserId: actorUserId ?? null,
+            updatedAt: now,
+          },
+        });
+
+      return { kind: 'wrong', attempt: failed, lockedUntil };
+    });
+
+    // ما بعد الالتزام: الكتابة محفوظة، فالرمي الآن لا يُلغيها
+    if (verdict.kind === 'ok') return;
+
+    if (verdict.kind === 'locked') {
+      this.logger.warn(
+        `pin locked: ${targetType}/${targetId} actor=${actorUserId ?? '?'} retryAfter=${verdict.retryAfterSec}s`,
+      );
+      throw new ForbiddenException({ code: 'PIN_LOCKED', retryAfterSec: verdict.retryAfterSec });
+    }
 
     this.logger.warn(
-      `pin failed: ${targetType}/${targetId} actor=${actorUserId ?? '?'} attempt=${failed}`,
+      `pin failed: ${targetType}/${targetId} actor=${actorUserId ?? '?'} attempt=${verdict.attempt}`,
     );
     throw new ForbiddenException({
       code: 'WRONG_PIN',
-      ...(lockedUntil ? { lockedUntil: lockedUntil.toISOString() } : {}),
+      ...(verdict.lockedUntil ? { lockedUntil: verdict.lockedUntil.toISOString() } : {}),
     });
-  }
-
-  /** ينظّف عدّاد هدف نجح رمزه — لا داعي لإبقاء سجل بعد إتمام العملية */
-  private async reset(targetType: PinTarget, targetId: string): Promise<void> {
-    await this.db
-      .delete(pinAttempts)
-      .where(and(eq(pinAttempts.targetType, targetType), eq(pinAttempts.targetId, targetId)));
   }
 }

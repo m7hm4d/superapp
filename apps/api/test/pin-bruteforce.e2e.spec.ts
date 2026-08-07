@@ -174,6 +174,68 @@ describe('PIN brute-force protection', () => {
   });
 
   /**
+   * انحدار: السباق. القراءة والمقارنة والزيادة وقرار القفل كانت غير
+   * متسلسلة، فالمحاولات المتزامنة تقرأ العدّاد نفسه وتكتب `lockedUntil`
+   * محسوباً من قيمة قديمة. القياس قبل الإصلاح: **٢٠ هدفاً من ٢٠ بلا قفل**
+   * رغم بلوغ العدّاد أربعة. أهداف كثيرة لا هدف واحد: سباق يظهر مرة من كل
+   * عشرين لا يمسكه اختبار على هدف واحد.
+   */
+  it('أربع محاولات متزامنة تقفل كل هدف', async () => {
+    const targets = Array.from({ length: 20 }, () => target());
+    await Promise.all(
+      targets.map((t) => Promise.all([0, 1, 2, 3].map((i) => codeOf(attempt(t, `000${i}`))))),
+    );
+
+    const now = new Date();
+    for (const t of targets) {
+      const [row] = await db
+        .select()
+        .from(pinAttempts)
+        .where(and(eq(pinAttempts.targetType, t.targetType), eq(pinAttempts.targetId, t.targetId)));
+      expect(row?.failedCount).toBe(4);
+      expect(row?.lockedUntil?.getTime() ?? 0).toBeGreaterThan(now.getTime());
+    }
+  });
+
+  /** التزامن لا يفتح ثغرة في القفل: الرمز الصحيح يبقى مرفوضاً */
+  it('الرمز الصحيح لا يمرّ بالتزامن ما دام الهدف مقفلاً', async () => {
+    const t = target();
+    for (let i = 0; i < 4; i++) await codeOf(attempt(t, `000${i}`));
+
+    const codes = await Promise.all([
+      codeOf(attempt(t, '1234')),
+      codeOf(attempt(t, '1234')),
+      codeOf(attempt(t, '9999')),
+      codeOf(attempt(t, '1234')),
+    ]);
+    expect(codes).toEqual(['PIN_LOCKED', 'PIN_LOCKED', 'PIN_LOCKED', 'PIN_LOCKED']);
+  });
+
+  /**
+   * انحدار: جمود المسبح. الحارس يُستدعى داخل معاملات المُستدعي، فمشاركته
+   * المسبح تعني أن المعاملات الخارجية تحتجز كل الاتصالات وينتظر كلٌّ منها
+   * اتصالاً لن يتحرّر — توقّف الخدمة كلها لا هذه الطلبات وحدها. اثنتا عشرة
+   * معاملة متزامنة كافية (‏max الافتراضي في pg عشرة).
+   */
+  it('تداخل الحارس داخل معاملات لا يجمّد المسبح', async () => {
+    const nested = Promise.all(
+      Array.from({ length: 12 }, () =>
+        db
+          .transaction(async () => {
+            await guard.verify({ ...target(), expected: '1234', provided: '0000' });
+          })
+          .catch(() => undefined),
+      ),
+    ).then(() => 'completed' as const);
+
+    const outcome = await Promise.race([
+      nested,
+      new Promise<'frozen'>((r) => setTimeout(() => r('frozen'), 15_000)),
+    ]);
+    expect(outcome).toBe('completed');
+  }, 30_000);
+
+  /**
    * القفل يتصاعد أُسّياً، فالوصول إلى 10,000 احتمال يصير سنوات بدل ساعة.
    * الحساب هنا لا التجربة: الانتظار الفعلي غير عملي — وهذا هو المقصود.
    */

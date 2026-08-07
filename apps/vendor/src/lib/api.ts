@@ -9,6 +9,9 @@ const baseClient = createApiClient({
   baseUrl: process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000',
   storage,
   onUnauthorized: () => authStore.getState().setLoggedOut(),
+  // ‏__DEV__ ثابت يستبدله Metro وقت البناء: نسخة الإصدار تصير `false`
+  // فيُرفض أي عنوان غير https قبل أول طلب.
+  allowInsecureHttp: __DEV__,
 });
 
 /** استخراج code من ApiError بأمان (duck-typing كي لا نعتمد على instanceof عبر الحزم) */
