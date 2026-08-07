@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { VendorsModule } from '../vendors/vendors.module';
 import { PinGuardService } from '../../common/pin-guard.service';
 import { LedgerModule } from '../ledger/ledger.module';
 import { OrdersModule } from '../orders/orders.module';
@@ -15,7 +16,7 @@ import { VendorBatchesController } from './vendor-batches.controller';
  * واستلام/تسليم بـ PIN مع قيود الدفتر في المعاملة نفسها.
  */
 @Module({
-  imports: [OrdersModule, LedgerModule],
+  imports: [VendorsModule, OrdersModule, LedgerModule],
   controllers: [
     DriverProfileController,
     DriverBatchesController,

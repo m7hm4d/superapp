@@ -19,6 +19,7 @@ import type { SQL } from 'drizzle-orm';
 import { generatePin } from '../../common/codes';
 import { PinGuardService } from '../../common/pin-guard.service';
 import { DB, DbClient } from '../../db/drizzle.module';
+import { VendorDirectoryService } from '../vendors/vendor-directory.service';
 import { driverProfiles, settlements, users, vendorProfiles } from '../../db/schema';
 import type { SettlementUpdatedDomainEvent } from '../../realtime/events.publisher';
 import { LedgerService, parseOrderIds } from './ledger.service';
@@ -61,6 +62,7 @@ function endOfDay(d: Date): Date {
 export class SettlementsService {
   constructor(
     @Inject(DB) private readonly db: DbClient,
+    private readonly vendors: VendorDirectoryService,
     private readonly ledger: LedgerService,
     private readonly emitter: EventEmitter2,
     private readonly pinGuard: PinGuardService,
@@ -70,11 +72,7 @@ export class SettlementsService {
 
   async initiate(driverUserId: string, vendorId: string): Promise<SettlementView> {
     const driver = await this.requireDriverProfile(driverUserId);
-    const [vendor] = await this.db
-      .select({ id: vendorProfiles.id, storeNameAr: vendorProfiles.storeNameAr })
-      .from(vendorProfiles)
-      .where(eq(vendorProfiles.id, vendorId))
-      .limit(1);
+    const vendor = await this.vendors.summaryFor(vendorId);
     if (!vendor) {
       throw new NotFoundException({ code: 'VENDOR_NOT_FOUND' });
     }
@@ -359,11 +357,7 @@ export class SettlementsService {
   private async requireVendorProfile(
     userId: string,
   ): Promise<{ id: string; storeNameAr: string }> {
-    const [row] = await this.db
-      .select({ id: vendorProfiles.id, storeNameAr: vendorProfiles.storeNameAr })
-      .from(vendorProfiles)
-      .where(eq(vendorProfiles.userId, userId))
-      .limit(1);
+    const row = await this.vendors.summaryForUser(userId);
     if (!row) {
       throw new ForbiddenException({
         code: 'PENDING_APPROVAL',

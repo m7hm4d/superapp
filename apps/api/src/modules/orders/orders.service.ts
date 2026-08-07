@@ -24,6 +24,7 @@ import type { CreateOrderInput, OrderView } from '@superapp/shared';
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { generateOrderCode, generatePin } from '../../common/codes';
 import { DB, DbClient } from '../../db/drizzle.module';
+import { VendorDirectoryService } from '../vendors/vendor-directory.service';
 import {
   cities,
   featureFlags,
@@ -84,6 +85,7 @@ const CANCELLED_BY_FROM_ROLE: Record<Role | 'system', CancelledBy> = {
 export class OrdersService {
   constructor(
     @Inject(DB) private readonly db: DbClient,
+    private readonly vendors: VendorDirectoryService,
     private readonly emitter: EventEmitter2,
   ) {}
 
@@ -201,11 +203,7 @@ export class OrdersService {
     }
 
     // 1) البائع موجود + موافَق عليه + مفتوح
-    const [vendor] = await this.db
-      .select()
-      .from(vendorProfiles)
-      .where(eq(vendorProfiles.id, input.vendorId))
-      .limit(1);
+    const vendor = await this.vendors.summaryFor(input.vendorId);
     if (!vendor || vendor.approvalStatus !== ApprovalStatus.APPROVED || !vendor.isOpen) {
       throw new ConflictException({ code: 'VENDOR_CLOSED' });
     }
@@ -501,15 +499,7 @@ export class OrdersService {
   private async requireVendorProfile(
     userId: string,
   ): Promise<{ id: string; cityId: string; storeNameAr: string }> {
-    const [vendor] = await this.db
-      .select({
-        id: vendorProfiles.id,
-        cityId: vendorProfiles.cityId,
-        storeNameAr: vendorProfiles.storeNameAr,
-      })
-      .from(vendorProfiles)
-      .where(eq(vendorProfiles.userId, userId))
-      .limit(1);
+    const vendor = await this.vendors.summaryForUser(userId);
     if (!vendor) {
       // ApprovedGuard يمنع الوصول قبل هذا عادةً؛ حماية إضافية فقط
       throw new ForbiddenException({

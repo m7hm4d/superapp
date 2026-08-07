@@ -217,11 +217,6 @@
       "apps/api/src/modules/push/push.subscriber.ts"
     ],
     [
-      "push",
-      "vendorProfiles",
-      "apps/api/src/modules/push/push.subscriber.ts"
-    ],
-    [
       "realtime",
       "driverProfiles",
       "apps/api/src/realtime/realtime.gateway.ts"
@@ -229,11 +224,6 @@
     [
       "realtime",
       "users",
-      "apps/api/src/realtime/realtime.gateway.ts"
-    ],
-    [
-      "realtime",
-      "vendorProfiles",
       "apps/api/src/realtime/realtime.gateway.ts"
     ],
     [

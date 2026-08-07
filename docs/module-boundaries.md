@@ -19,9 +19,15 @@
 | `push` | `pushTokens` |
 | `vendors` | `products` · `vendorProfiles` |
 
+## المنافذ المتاحة
+
+| المنفذ | الوحدة | يغني عن |
+|---|---|---|
+| `VendorDirectoryService` | `vendors` | استعلام `vendorProfiles` مباشرة |
+
 ## الخروق الباقية
 
-**48** خرقاً في `scripts/module-boundaries-baseline.json`.
+**46** خرقاً في `scripts/module-boundaries-baseline.json`.
 القائمة تُفرَّغ ولا تُملأ: كل سطر يُحذف تقدّم، وأي خرق جديد يُسقط CI.
 
 | الوحدة | خروقها |
@@ -32,13 +38,13 @@
 | `common` | 4 |
 | `orders` | 4 |
 | `auth` | 3 |
-| `realtime` | 3 |
-| `push` | 2 |
+| `realtime` | 2 |
+| `push` | 1 |
 | `vendors` | 1 |
 
-| الجدول المطلوب | كم وحدة تلمسه بلا ملكية |
+| الجدول المطلوب | كم لمسة بلا ملكية |
 |---|---|
-| `vendorProfiles` | 11 |
+| `vendorProfiles` | 9 |
 | `driverProfiles` | 8 |
 | `users` | 7 |
 | `orders` | 5 |
@@ -58,5 +64,9 @@
 1. أضف منفذاً معلناً في وحدة المالك (`vendors.summaryFor(id)`)
 2. استبدل الاستعلام المباشر بندائه
 3. `python3 scripts/check-module-boundaries.py --update`
+
+**الانضمامات تحتاج حذراً**: استبدال `innerJoin` بنداء لكل صف يحوّل استعلاماً
+واحداً إلى N+1. استعمل المنفذ الدفعي (`summariesFor`) ثم اضمم في الذاكرة —
+استعلامان محدودان لا استعلام لكل صف.
 
 لتغيير مالك: عدّل `scripts/module-ownership.json` — لا شيء آخر يعرف بالملكية.
