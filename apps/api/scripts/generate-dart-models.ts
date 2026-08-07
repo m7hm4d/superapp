@@ -171,5 +171,7 @@ for (const [name, schema] of Object.entries(doc.components.schemas)) {
 }
 
 mkdirSync(dirname(OUT), { recursive: true });
-writeFileSync(OUT, `${lines.join('\n')}\n`);
+// آخر عنصر في lines فراغ يفصل الأصناف — تركه ينتج سطراً فارغاً زائداً
+// في نهاية الملف يمسكه `git diff --check`.
+writeFileSync(OUT, `${lines.join('\n').replace(/\n+$/, '')}\n`);
 console.log(`generated_models.dart written — ${modelNames.size} models`);

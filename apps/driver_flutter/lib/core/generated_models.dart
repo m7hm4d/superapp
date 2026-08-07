@@ -241,14 +241,14 @@ class DriverLedger {
   final int todayFeesIqd;
   final int cashOnHandIqd;
   final List<Map<String, dynamic>> owed;
-  final List<Map<String, dynamic>> settlements;
+  final List<Settlement> settlements;
 
   factory DriverLedger.fromJson(Map<String, dynamic> j) => DriverLedger(
         todayDeliveredCount: _int(j['todayDeliveredCount']),
         todayFeesIqd: _int(j['todayFeesIqd']),
         cashOnHandIqd: _int(j['cashOnHandIqd']),
         owed: ((j['owed'] as List?) ?? const []).cast<Map<String, dynamic>>().toList(),
-        settlements: ((j['settlements'] as List?) ?? const []).cast<Map<String, dynamic>>().toList(),
+        settlements: ((j['settlements'] as List?) ?? const []).cast<Map<String, dynamic>>().map(Settlement.fromJson).toList(),
       );
 
   Map<String, dynamic> toJson() => {
@@ -256,7 +256,79 @@ class DriverLedger {
         'todayFeesIqd': todayFeesIqd,
         'cashOnHandIqd': cashOnHandIqd,
         'owed': owed,
-        'settlements': settlements,
+        'settlements': settlements.map((e) => e.toJson()).toList(),
+      };
+}
+
+class Settlement {
+  const Settlement({
+    required this.id,
+    required this.vendorId,
+    required this.vendorNameAr,
+    required this.driverId,
+    required this.driverName,
+    required this.status,
+    required this.amountIqd,
+    required this.orderIds,
+    this.settlementPin,
+    required this.createdAt,
+    this.settledAt,
+  });
+
+  final String id;
+  final String vendorId;
+  final String vendorNameAr;
+  final String driverId;
+  final String driverName;
+  final String status;
+  final int amountIqd;
+  final List<String> orderIds;
+  final String? settlementPin;
+  final String createdAt;
+  final String? settledAt;
+
+  factory Settlement.fromJson(Map<String, dynamic> j) => Settlement(
+        id: _str(j['id']),
+        vendorId: _str(j['vendorId']),
+        vendorNameAr: _str(j['vendorNameAr']),
+        driverId: _str(j['driverId']),
+        driverName: _str(j['driverName']),
+        status: _str(j['status']),
+        amountIqd: _int(j['amountIqd']),
+        orderIds: ((j['orderIds'] as List?) ?? const []).cast<String>().toList(),
+        settlementPin: j['settlementPin'] as String?,
+        createdAt: _str(j['createdAt']),
+        settledAt: j['settledAt'] as String?,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'vendorId': vendorId,
+        'vendorNameAr': vendorNameAr,
+        'driverId': driverId,
+        'driverName': driverName,
+        'status': status,
+        'amountIqd': amountIqd,
+        'orderIds': orderIds,
+        'settlementPin': settlementPin,
+        'createdAt': createdAt,
+        'settledAt': settledAt,
+      };
+}
+
+class InitiateSettlementRequest {
+  const InitiateSettlementRequest({
+    required this.vendorId,
+  });
+
+  final String vendorId;
+
+  factory InitiateSettlementRequest.fromJson(Map<String, dynamic> j) => InitiateSettlementRequest(
+        vendorId: _str(j['vendorId']),
+      );
+
+  Map<String, dynamic> toJson() => {
+        'vendorId': vendorId,
       };
 }
 
@@ -331,4 +403,3 @@ class SetAvailabilityRequest {
         'isAvailable': isAvailable,
       };
 }
-

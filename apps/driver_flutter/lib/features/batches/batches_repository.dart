@@ -54,11 +54,20 @@ class BatchesRepository {
     return DriverLedger.fromJson(res);
   }
 
-  Future<void> openSettlement({required String vendorId, required int amountIqd}) =>
-      _api.post<dynamic>('driver/settlements', body: {
-        'vendorId': vendorId,
-        'amountIqd': amountIqd,
-      });
+  /// يعيد التسوية المنشأة **بما فيها `settlementPin`** — الرمز الذي يمليه
+  /// السائق على المخبز ليؤكّد. إهماله يعطّل المسار: يفتح السائق تسوية ولا
+  /// يملك ما يقوله للمخبز.
+  ///
+  /// المبلغ لا يُرسل: الخادم يحسب مجموع الطلبات المسلَّمة غير المسوّاة
+  /// بنفسه (`zInitiateSettlement` يقبل `vendorId` وحده). إرساله كان يوهم
+  /// بأن العميل يقرّره.
+  Future<Settlement> openSettlement({required String vendorId}) async {
+    final res = await _api.post<Map<String, dynamic>>(
+      'driver/settlements',
+      body: {'vendorId': vendorId},
+    );
+    return Settlement.fromJson(res);
+  }
 
   Future<void> setAvailability(bool isAvailable) =>
       _api.patch<dynamic>('driver/availability', body: {'isAvailable': isAvailable});

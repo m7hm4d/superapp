@@ -19,6 +19,8 @@ const MODELS: Record<string, z.ZodTypeAny> = {
   Batch: shared.zBatchView,
   DriverBatch: shared.zDriverBatchView,
   DriverLedger: shared.zDriverLedger,
+  Settlement: shared.zSettlementView,
+  InitiateSettlementRequest: shared.zInitiateSettlement,
   ConfirmPickupRequest: shared.zConfirmPickup,
   ConfirmDeliveryRequest: shared.zConfirmDelivery,
   ReportExceptionRequest: shared.zReportException,
@@ -51,6 +53,13 @@ const PATHS = {
   },
   '/driver/ledger': {
     get: { summary: 'دفتر السائق المالي', response: 'DriverLedger' },
+  },
+  '/driver/settlements': {
+    post: {
+      summary: 'بدء تسوية — الاستجابة تحمل settlementPin ليعرضه السائق للمخبز',
+      request: 'InitiateSettlementRequest',
+      response: 'Settlement',
+    },
   },
   '/driver/availability': {
     patch: { summary: 'الاتصال للعمل', request: 'SetAvailabilityRequest' },

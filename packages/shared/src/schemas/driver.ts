@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { zLatLng, zPin, zUuid } from './common';
+import { zSettlementView } from './settlements';
 
 export const zSetAvailability = z.object({ isAvailable: z.boolean() });
 
@@ -87,16 +88,12 @@ export const zDriverLedger = z.object({
       amountIqd: z.number().int(),
     }),
   ),
-  settlements: z.array(
-    z.object({
-      id: zUuid,
-      vendorId: zUuid,
-      vendorNameAr: z.string(),
-      amountIqd: z.number().int(),
-      status: z.string(),
-      createdAt: z.string(),
-    }),
-  ),
+  /**
+   * تسويات السائق. تحمل `settlementPin` ما دامت بانتظار تأكيد المخبز —
+   * فالرمز ليس صالحاً لحظة الإنشاء فقط، والسائق يستعيده من هنا لو أغلق
+   * التطبيق قبل أن يُريه للمخبز.
+   */
+  settlements: z.array(zSettlementView),
 });
 
 export type BatchStopView = z.infer<typeof zBatchStopView>;

@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/errors.dart';
 import '../../core/money.dart';
+import '../../core/models.dart';
 import '../batches/batches_repository.dart';
+import 'settlement_pin_dialog.dart';
 
 /// D-05 النقد: ما بعهدة السائق، وما يدين به لكل مخبز، وفتح تسوية.
 class CashScreen extends ConsumerWidget {
@@ -60,15 +62,7 @@ class CashScreen extends ConsumerWidget {
               const SizedBox(height: 16),
               Text('التسويات', style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 8),
-              ...l.settlements.map(
-                (s) => Card(
-                  child: ListTile(
-                    title: Text(s['vendorNameAr']?.toString() ?? 'مخبز'),
-                    subtitle: Text(_settlementLabel(s['status']?.toString())),
-                    trailing: Text(formatIqd(s['amountIqd'] ?? 0)),
-                  ),
-                ),
-              ),
+              ...l.settlements.map(_SettlementCard.new),
             ],
           ],
         ),
@@ -76,7 +70,7 @@ class CashScreen extends ConsumerWidget {
     );
   }
 
-  static String _settlementLabel(String? status) => switch (status) {
+  static String settlementLabel(String? status) => switch (status) {
         'UNSETTLED' => 'غير مسوّاة',
         'AWAITING_CONFIRMATION' => 'بانتظار تأكيد المخبز',
         'SETTLED' => 'مسوّاة',
@@ -118,8 +112,11 @@ class _OwedCardState extends ConsumerState<_OwedCard> {
 
     setState(() => _busy = true);
     try {
-      await ref.read(repoProvider).openSettlement(vendorId: vendorId, amountIqd: amount);
+      final settlement = await ref.read(repoProvider).openSettlement(vendorId: vendorId);
       ref.invalidate(ledgerProvider);
+      // الرمز يُعرض فوراً: بدونه لا يملك السائق ما يقوله للمخبز
+      if (mounted) await SettlementPinDialog.show(context, settlement);
+      if (mounted) setState(() => _busy = false);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -139,4 +136,41 @@ class _OwedCardState extends ConsumerState<_OwedCard> {
               : TextButton(onPressed: _settle, child: const Text('تسوية')),
         ),
       );
+}
+
+/// بطاقة تسوية. الرمز يبقى ظاهراً ما دامت بانتظار تأكيد المخبز — فلو أغلق
+/// السائق التطبيق قبل أن يمليه، يستعيده من هنا بلا فتح تسوية ثانية.
+class _SettlementCard extends StatelessWidget {
+  const _SettlementCard(this.settlement);
+  final Settlement settlement;
+
+  @override
+  Widget build(BuildContext context) {
+    final pin = settlement.settlementPin;
+    return Card(
+      child: ListTile(
+        title: Text(settlement.vendorNameAr),
+        subtitle: Text(CashScreen.settlementLabel(settlement.status)),
+        trailing: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text(formatIqd(settlement.amountIqd)),
+            if (pin != null && pin.isNotEmpty)
+              Text(
+                'الرمز $pin',
+                textDirection: TextDirection.ltr,
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+              ),
+          ],
+        ),
+        onTap: pin != null && pin.isNotEmpty
+            ? () => SettlementPinDialog.show(context, settlement)
+            : null,
+      ),
+    );
+  }
 }

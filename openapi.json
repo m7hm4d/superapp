@@ -273,38 +273,7 @@
           "settlements": {
             "type": "array",
             "items": {
-              "type": "object",
-              "properties": {
-                "id": {
-                  "type": "string",
-                  "format": "uuid"
-                },
-                "vendorId": {
-                  "type": "string",
-                  "format": "uuid"
-                },
-                "vendorNameAr": {
-                  "type": "string"
-                },
-                "amountIqd": {
-                  "type": "integer"
-                },
-                "status": {
-                  "type": "string"
-                },
-                "createdAt": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "id",
-                "vendorId",
-                "vendorNameAr",
-                "amountIqd",
-                "status",
-                "createdAt"
-              ],
-              "additionalProperties": false
+              "$ref": "#/components/schemas/Settlement"
             }
           }
         },
@@ -314,6 +283,77 @@
           "cashOnHandIqd",
           "owed",
           "settlements"
+        ],
+        "additionalProperties": false
+      },
+      "Settlement": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "vendorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "vendorNameAr": {
+            "type": "string"
+          },
+          "driverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "driverName": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "amountIqd": {
+            "type": "integer"
+          },
+          "orderIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "settlementPin": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "settledAt": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "vendorId",
+          "vendorNameAr",
+          "driverId",
+          "driverName",
+          "status",
+          "amountIqd",
+          "orderIds",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "InitiateSettlementRequest": {
+        "type": "object",
+        "properties": {
+          "vendorId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "vendorId"
         ],
         "additionalProperties": false
       },
@@ -566,6 +606,38 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/DriverLedger"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/driver/settlements": {
+      "post": {
+        "summary": "بدء تسوية — الاستجابة تحمل settlementPin ليعرضه السائق للمخبز",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InitiateSettlementRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "نجاح",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Settlement"
                 }
               }
             }

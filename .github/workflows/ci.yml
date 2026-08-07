@@ -137,6 +137,21 @@ jobs:
           fi
           echo "contract is in sync with the schemas"
 
+      # المقارنة وحدها لا تكفي: مولّد يُخرج Dart مكسوراً ثم يُحفَظ ناتجه
+      # نفسه يمرّ الفحص. أخطاء المولّد السابقة لم يكشفها إلا محلّل Dart،
+      # فيجب أن يعمل هنا.
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: '3.44.6'
+          cache: true
+
+      - name: The generated Dart must analyse and pass its tests
+        working-directory: apps/driver_flutter
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test"
+
   # حزمة النشر لا يلمسها job الاختبارات إطلاقاً: ملفات Compose وCaddy
   # وDockerfileات تُكسر بصمت ولا يُكتشف ذلك إلا على الخادم. يعمل بالتوازي
   # مع test فلا يطيل زمن CI.
