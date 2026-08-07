@@ -188,12 +188,18 @@ sudo install -m 755 cosign /usr/local/bin/cosign && rm cosign
 
 ### ٦. الـseed مرة واحدة
 
-ينشئ حساب الأدمن والمدينة والأدوار:
+في الإنتاج (`NODE_ENV=production`) ينشئ **ما يلزم التشغيل فقط**: المستأجر
+والمدينة والأعلام وحساب الأدمن.
 
 ```bash
 ./deploy/compose.sh run --rm api \
   node -r ./dist/apps/api/src/register-paths.js dist/apps/api/src/db/seed/seed.js
 ```
+
+البيانات التجريبية (بائعون وسائقون وزبائن ومنتجات وطلبات) **تُرفض في الإنتاج**:
+كلمات مرورها ثابتة في هذا المستودع، فبذرُها على نطاق عام يزرع حسابات حيّة
+باعتمادات يعرفها كل من قرأ الشيفرة. لبيئة عرض تريدها ممتلئة عن قصد:
+`SEED_DEMO_DATA=true`.
 
 ثم افرغ `SEED_ADMIN_PASSWORD` من `.env.prod`. أول دخول إلى `https://admin.4irq.com`
 يطلب تسجيل TOTP أو مفتاح مرور.

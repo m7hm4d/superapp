@@ -279,6 +279,13 @@ async function main(): Promise<void> {
   const db: Db = drizzle(pool);
 
   try {
+    // البيانات التجريبية تُبذر في التطوير والاختبار، وتُرفض في الإنتاج ما لم
+    // تُطلب صراحةً. الافتراض الآمن هو الرفض: من ينسى الضبط يحصل على قاعدة
+    // ناقصة يلاحظها فوراً، لا على حسابات مفتوحة لا يلاحظها أحد.
+    const seedDemoData =
+      process.env.SEED_DEMO_DATA === 'true' ||
+      (process.env.SEED_DEMO_DATA !== 'false' && process.env.NODE_ENV !== 'production');
+
     // 1) المستأجر + المدينة + الأعلام
     const tenant = await ensureTenant(db);
     const city = await ensureCity(db, tenant.id);
@@ -354,6 +361,21 @@ async function main(): Promise<void> {
       adminTotpDisplay = '(مسجَّل من SEED_ADMIN_TOTP_SECRET — للتطوير فقط)';
     }
 
+    // ─────────────── ما بعد هذا بيانات تجريبية ───────────────
+    //
+    // ‏كلمات مرور هذه الحسابات **ثابتة في المستودع**: من قرأ الشيفرة يعرفها.
+    // بذرُها على بيئة عامة يزرع حسابات بائع وسائق وزبون حيّة باعتمادات
+    // معلومة — باب خلفي لا يحتاج ثغرة ليُفتح.
+    //
+    // فترفض هنا افتراضياً في الإنتاج. ولمن أراد بيئة عرض حقيقية:
+    // `SEED_DEMO_DATA=true` قرار صريح مكتوب، لا سهو.
+    if (!seedDemoData) {
+      console.log(
+        '\n‏NODE_ENV=production — تُخطّى البيانات التجريبية (حسابات بكلمات مرور منشورة).\n' +
+          'أُنشئ ما يلزم الإنتاج فقط: المستأجر والمدينة والأعلام وحساب الأدمن.\n' +
+          'لبيئة عرض: SEED_DEMO_DATA=true',
+      );
+    } else {
     // 4) البائعون المعتمدون + منتجاتهم
     const vendorByPhone = new Map<
       string,
@@ -594,6 +616,7 @@ async function main(): Promise<void> {
       }
     }
 
+    }
     // 9) الملخص
     const [
       tenantCount,
@@ -643,18 +666,24 @@ async function main(): Promise<void> {
       ordersByStatus.map((row) => ({ order_status: row.status, count: row.n })),
     );
 
-    console.log('===== Test credentials =====');
+    // لا تُطبع اعتمادات لم تُنشأ: جدول يعرض حسابات غير موجودة يدفع إلى
+    // تجربتها ثم إلى الظن أن في المصادقة عطلاً.
+    console.log('===== Credentials =====');
     console.table([
       {
         role: 'admin (لوحة الويب فقط)',
         login: ADMIN_SEED.email,
         password: `${adminPasswordDisplay} + TOTP ${adminTotpDisplay}`,
       },
-      { role: 'vendor', login: '+9647701000001 .. +9647701000006', password: VENDOR_PASSWORD },
-      { role: 'vendor (pending)', login: PENDING_VENDOR.phone, password: VENDOR_PASSWORD },
-      { role: 'driver', login: '+9647702000001 .. +9647702000002', password: DRIVER_PASSWORD },
-      { role: 'driver (pending)', login: '+9647702000003', password: DRIVER_PASSWORD },
-      { role: 'customer', login: '+9647703000001 .. +9647703000003', password: CUSTOMER_PASSWORD },
+      ...(seedDemoData
+        ? [
+            { role: 'vendor', login: '+9647701000001 .. +9647701000006', password: VENDOR_PASSWORD },
+            { role: 'vendor (pending)', login: PENDING_VENDOR.phone, password: VENDOR_PASSWORD },
+            { role: 'driver', login: '+9647702000001 .. +9647702000002', password: DRIVER_PASSWORD },
+            { role: 'driver (pending)', login: '+9647702000003', password: DRIVER_PASSWORD },
+            { role: 'customer', login: '+9647703000001 .. +9647703000003', password: CUSTOMER_PASSWORD },
+          ]
+        : []),
     ]);
     console.log('seed completed');
   } finally {
