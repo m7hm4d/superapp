@@ -16,6 +16,7 @@ import {
 } from '@superapp/shared';
 import type { BatchStopView, BatchView, LatLng } from '@superapp/shared';
 import { and, asc, eq, gt, inArray, isNull, notExists, sql } from 'drizzle-orm';
+import { PinGuardService } from '../../common/pin-guard.service';
 import { DB, DbClient } from '../../db/drizzle.module';
 import {
   batchOrders,
@@ -83,6 +84,7 @@ export class DriversService {
     private readonly ordersService: OrdersService,
     private readonly ledgerService: LedgerService,
     private readonly emitter: EventEmitter2,
+    private readonly pinGuard: PinGuardService,
   ) {}
 
   // ─────────────────────────────── الملف الشخصي ───────────────────────────────
@@ -326,9 +328,14 @@ export class DriversService {
           to: BatchStatus.PICKUP_CONFIRMED,
         });
       }
-      if (batch.pickupPin !== pin) {
-        throw new ForbiddenException({ code: 'WRONG_PIN' });
-      }
+      // الحارس يرمي عند الخطأ أو القفل — لا يعود إلا على رمز صحيح
+      await this.pinGuard.verify({
+        targetType: 'batch_pickup',
+        targetId: batchId,
+        expected: batch.pickupPin,
+        provided: pin,
+        actorUserId: userId,
+      });
 
       await tx
         .update(batches)
@@ -386,9 +393,13 @@ export class DriversService {
         to: OrderStatus.DELIVERED,
       });
     }
-    if (input.pin !== row.order.deliveryPin) {
-      throw new ForbiddenException({ code: 'WRONG_PIN' });
-    }
+    await this.pinGuard.verify({
+      targetType: 'order_delivery',
+      targetId: orderId,
+      expected: row.order.deliveryPin,
+      provided: input.pin,
+      actorUserId: userId,
+    });
     if (input.cashCollectedIqd !== row.order.totalIqd) {
       throw new ConflictException({ code: 'CASH_MISMATCH', expected: row.order.totalIqd });
     }

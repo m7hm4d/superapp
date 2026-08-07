@@ -1,5 +1,5 @@
 import type { TokenStorage } from './storage';
-import { stripLeadingSlashes, stripTrailingSlashes } from './url';
+import { assertUsableApiUrl, stripLeadingSlashes, stripTrailingSlashes } from './url';
 import { uuid } from './uuid';
 
 /** خطأ API موحّد: {code, message?, requestId} من الباكند. */
@@ -29,6 +29,11 @@ export interface CreateApiClientOptions {
   baseUrl: string;
   storage: TokenStorage;
   onUnauthorized?: () => void;
+  /**
+   * السماح بـ`http://` — يمرّره التطبيق من إشارة التطوير عنده (`__DEV__`
+   * في إكسبو، `NODE_ENV` في اللوحة). افتراضه `false` فيفشل مغلقاً.
+   */
+  allowInsecureHttp?: boolean;
 }
 
 export interface ApiClient {
@@ -41,6 +46,17 @@ export interface ApiClient {
    * مخصص لاتصال الـ socket (مرره كـ getToken في createSocket).
    */
   getFreshAccessToken(): Promise<string | null>;
+  /**
+   * خروج يُبطل الجلسة على **الخادم** ثم يمسح المخزن محلياً.
+   *
+   * مسح المخزن وحده لا يُبطل شيئاً: رمز التحديث يبقى صالحاً حتى انتهائه
+   * (ثلاثون يوماً للوحة الإدارة)، فمن نسخه من جهاز مشترك أو نسخة احتياطية
+   * يبقى داخل الحساب بعد «الخروج» — والمستخدم يظنّ نفسه خرج.
+   *
+   * الإبطال أفضل جهد: انقطاع الشبكة لا يجوز أن يحبس أحداً داخل جلسة،
+   * فالمسح المحلي يقع في كل الأحوال.
+   */
+  logout(): Promise<void>;
   readonly baseUrl: string;
   readonly storage: TokenStorage;
 }
@@ -121,7 +137,11 @@ function toApiError(status: number, body: unknown, fallbackRequestId?: string): 
 }
 
 export function createApiClient(opts: CreateApiClientOptions): ApiClient {
-  const { baseUrl, storage, onUnauthorized } = opts;
+  const { baseUrl, storage, onUnauthorized, allowInsecureHttp = false } = opts;
+
+  // عند الإنشاء لا عند أول طلب: العطل يظهر وقت الإقلاع لا بعد أن يكتب
+  // المستخدم كلمة مروره.
+  assertUsableApiUrl(baseUrl, allowInsecureHttp);
 
   /** وعد تجديد واحد مشترك بين كل طلبات 401 المتزامنة. */
   let refreshPromise: Promise<boolean> | null = null;
@@ -261,10 +281,30 @@ export function createApiClient(opts: CreateApiClientOptions): ApiClient {
     return data as T;
   }
 
+  async function logout(): Promise<void> {
+    try {
+      // توكن وصول صالح أولاً: المسار يتطلب مصادقة، ولولا ذلك لانتهى بـ401
+      // فيُمسح المخزن محلياً وتبقى العائلة حيّة على الخادم — وهو العطل عينه.
+      // وقراءة رمز التحديث **بعد** التجديد كي يحمل الجسم الرمز الحيّ.
+      await getFreshAccessToken();
+      const refreshToken = await storage.getRefresh();
+      if (refreshToken) {
+        await request<unknown>('POST', 'auth/logout', undefined, { refreshToken });
+      }
+    } catch {
+      // متروك عمداً: الفشل هنا لا يمنع الخروج المحلي.
+    } finally {
+      // بلا onUnauthorized: معناه «سقطت الجلسة فجأة» لا «خرج المستخدم عمداً»،
+      // واللوحة تعلّق عليه تنقلاً كاملاً للصفحة. كل تطبيق يعيد حالته بنفسه.
+      await storage.clear();
+    }
+  }
+
   return {
     baseUrl,
     storage,
     getFreshAccessToken,
+    logout,
     get<T>(path: string, query?: Record<string, unknown>): Promise<T> {
       return request<T>('GET', path, query);
     },
