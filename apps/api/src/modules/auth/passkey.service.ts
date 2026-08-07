@@ -36,9 +36,12 @@ export interface PasskeySummary {
 /**
  * مفاتيح المرور للإدارة (WebAuthn).
  *
- * مفتاح المرور عامل كامل بذاته: حيازة الجهاز + بصمة/رمز الجهاز، ومربوط
- * بالنطاق تشفيرياً فلا يُصطاد كما يُصطاد رمز TOTP. لذلك الدخول به وحده
- * يصدر جلسة كاملة، ويبقى TOTP مساراً بديلاً لا يُحذف.
+ * مفتاح المرور **عامل ثانٍ** لا بديل عن الأول: يأتي بعد كلمة المرور، بديلاً
+ * عن رمز TOTP لا عن كامل الدخول. مفتاح متزامن على جهاز مسروق مفتوح لا يكفي
+ * وحده — يبقى عامل «ما تعرفه» شرطاً لدخول لوحة الإدارة.
+ *
+ * وهو مع ذلك أقوى من TOTP كعامل ثانٍ: مربوط بالنطاق تشفيرياً فلا يُصطاد،
+ * بينما رمز TOTP يُملى على صفحة مزيّفة ويُمرَّر خلال ثلاثين ثانية.
  */
 @Injectable()
 export class PasskeyService {
@@ -141,24 +144,38 @@ export class PasskeyService {
   // ─────────────────────────────── الدخول ───────────────────────────────
 
   /** بلا بريد: المفتاح قابل للاكتشاف فيختاره الجهاز — دخول بلمسة واحدة */
-  async authenticationOptions() {
+  /**
+   * خيارات مقصورة على مفاتيح هذا الحساب: صاحب التوكن معروف أصلاً لأن كلمة
+   * مروره تحققت، فلا داعي لمفتاح قابل للاكتشاف. والتقييد يمنع أن يُتمّ
+   * مفتاحُ حسابٍ آخر دخولَ هذا الحساب.
+   */
+  async authenticationOptions(userId: string) {
+    const keys = await this.db
+      .select({ credentialId: adminPasskeys.credentialId })
+      .from(adminPasskeys)
+      .where(eq(adminPasskeys.userId, userId));
+    if (keys.length === 0) {
+      throw new UnauthorizedException({ code: 'NO_PASSKEY' });
+    }
     const options = await generateAuthenticationOptions({
       rpID: this.rpID,
       userVerification: 'preferred',
+      allowCredentials: keys.map((k) => ({ id: k.credentialId })),
     });
-    await this.storeChallenge(options.challenge, 'login', null);
+    await this.storeChallenge(options.challenge, 'login', userId);
     return options;
   }
 
   async verifyAuthentication(
     response: AuthenticationResponseJSON,
+    userId: string,
     ctx: AuthContext = {},
   ): Promise<{ user: AuthUser; tokens: AuthTokens }> {
     const event = { ...ctx, method: 'admin_passkey' as const };
     const challenge = await this.consumeChallenge(
       this.challengeFromClientData(response.response.clientDataJSON),
       'login',
-      null,
+      userId,
     );
 
     const [row] = await this.db
@@ -171,6 +188,12 @@ export class PasskeyService {
     if (!row || row.user.role !== Role.ADMIN) {
       await this.events.record({ ...event, outcome: 'unknown_identifier' });
       throw new UnauthorizedException({ code: 'PASSKEY_UNKNOWN' });
+    }
+    // المفتاح يجب أن يخصّ من تحققت كلمة مروره. بدون هذا الفحص يكمل صاحب
+    // مفتاح آخر دخول حساب لا يملك كلمة مروره.
+    if (row.passkey.userId !== userId) {
+      await this.events.record({ ...event, userId: row.user.id, outcome: 'invalid_credentials' });
+      throw new UnauthorizedException({ code: 'PASSKEY_MISMATCH' });
     }
     if (row.user.status === UserStatus.BLOCKED) {
       await this.events.record({ ...event, userId: row.user.id, outcome: 'blocked' });

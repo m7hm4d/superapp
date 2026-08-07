@@ -21,8 +21,11 @@ const zPasskeyRegistration = z.object({
   label: z.string().max(60).optional(),
 });
 const zPasskeyAuthentication = z.object({ response: z.record(z.unknown()) });
+/** توكن العامل الثاني — يثبت أن كلمة المرور تحققت لتوّها */
+const zStepUp = z.object({ stepUpToken: z.string().min(1) });
+const zPasskeyLogin = zPasskeyAuthentication.merge(zStepUp);
 type PasskeyRegistrationInput = z.infer<typeof zPasskeyRegistration>;
-type PasskeyAuthenticationInput = z.infer<typeof zPasskeyAuthentication>;
+type PasskeyLoginInput = z.infer<typeof zPasskeyLogin>;
 type AdminLoginInput = z.infer<typeof zAdminLogin>;
 type TotpTokenInput = z.infer<typeof zTotpToken>;
 
@@ -68,25 +71,32 @@ export class AdminAuthController {
 
   // ─────────────────────────── مفاتيح المرور ───────────────────────────
 
-  /** بلا بريد: المفتاح قابل للاكتشاف فيختاره الجهاز — دخول بلمسة */
+  /**
+   * عامل ثانٍ لا أول: يلزمه توكن يثبت أن كلمة المرور تحققت للتوّ. الخيارات
+   * مقصورة على مفاتيح صاحب التوكن.
+   */
   @Public()
   @AuthThrottle()
   @HttpCode(200)
   @Post('passkey/login/options')
-  passkeyLoginOptions() {
-    return this.passkeys.authenticationOptions();
+  async passkeyLoginOptions(
+    @Body(new ZodValidationPipe(zStepUp)) body: { stepUpToken: string },
+  ) {
+    const userId = await this.adminAuth.userIdFromStepUpToken(body.stepUpToken);
+    return this.passkeys.authenticationOptions(userId);
   }
 
-  /** مفتاح المرور عامل كامل بذاته — النجاح يصدر جلسة إدارية مباشرة */
+  /** إتمام الدخول: كلمة المرور تحققت، والمفتاح هو العامل الثاني */
   @Public()
   @AuthThrottle()
   @HttpCode(200)
   @Post('passkey/login/verify')
-  passkeyLoginVerify(
-    @Body(new ZodValidationPipe(zPasskeyAuthentication)) body: PasskeyAuthenticationInput,
+  async passkeyLoginVerify(
+    @Body(new ZodValidationPipe(zPasskeyLogin)) body: PasskeyLoginInput,
     @Req() req: object,
   ) {
-    return this.passkeys.verifyAuthentication(body.response as never, authContextFrom(req));
+    const userId = await this.adminAuth.userIdFromStepUpToken(body.stepUpToken);
+    return this.passkeys.verifyAuthentication(body.response as never, userId, authContextFrom(req));
   }
 
   /** التسجيل متاح للجلسة الكاملة ولتوكن التسجيل — فيختار الأدمن الجديد مفتاحاً بدل TOTP */

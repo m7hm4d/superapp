@@ -69,9 +69,12 @@ describe('admin TOTP is mandatory', () => {
   it('password alone is not enough, and a wrong code is rejected', async () => {
     const admin = await createAdmin(db, { secret: totp.generateSecret() });
 
-    const noCode = await login({ email: admin.email, password: ADMIN_PASSWORD }).expect(401);
-    expect(noCode.body.code).toBe('TOTP_REQUIRED');
+    // كلمة المرور وحدها لا تُصدر جلسة: تعيد قائمة العوامل وتوكناً لإتمامها
+    const noCode = await login({ email: admin.email, password: ADMIN_PASSWORD }).expect(200);
+    expect(noCode.body.status).toBe('second_factor_required');
+    expect(noCode.body.methods).toEqual(['totp']);
     expect(noCode.body.tokens).toBeUndefined();
+    expect(noCode.body.user).toBeUndefined();
 
     const wrong = await login({
       email: admin.email,
@@ -155,10 +158,13 @@ describe('admin TOTP is mandatory', () => {
       .set('Authorization', `Bearer ${enable.body.tokens.accessToken}`)
       .expect(200);
 
-    // وبعدها الرمز مطلوب دائماً
+    // وبعدها العامل الثاني مطلوب دائماً — ولا جلسة بكلمة المرور وحدها
     await login({ email: admin.email, password: ADMIN_PASSWORD })
-      .expect(401)
-      .expect((r) => expect(r.body.code).toBe('TOTP_REQUIRED'));
+      .expect(200)
+      .expect((r) => {
+        expect(r.body.status).toBe('second_factor_required');
+        expect(r.body.tokens).toBeUndefined();
+      });
   });
 
   it('re-enrollment keeps the working device until the new one is confirmed', async () => {
@@ -223,7 +229,10 @@ describe('admin TOTP is mandatory', () => {
       m.adminCredentialsFromEnv(),
     );
     await login({ email, password })
-      .expect(401)
-      .expect((r) => expect(r.body.code).toBe('TOTP_REQUIRED'));
+      .expect(200)
+      .expect((r) => {
+        expect(r.body.status).toBe('second_factor_required');
+        expect(r.body.tokens).toBeUndefined();
+      });
   });
 });

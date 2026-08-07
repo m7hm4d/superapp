@@ -13,10 +13,18 @@ import type { AuthTokens, AuthUser } from '@superapp/shared';
 
 export const passkeySupported = (): boolean => browserSupportsWebAuthn();
 
-export async function loginWithPasskey(): Promise<{ user: AuthUser; tokens: AuthTokens }> {
-  const options = await api.post<Record<string, unknown>>('auth/admin/passkey/login/options');
+/**
+ * عامل ثانٍ لا أول: يلزمه `stepUpToken` الصادر بعد التحقق من كلمة المرور.
+ * الخيارات مقصورة على مفاتيح هذا الحساب، فلا يُطلب من المستخدم اختيار حساب.
+ */
+export async function loginWithPasskey(
+  stepUpToken: string,
+): Promise<{ user: AuthUser; tokens: AuthTokens }> {
+  const options = await api.post<Record<string, unknown>>('auth/admin/passkey/login/options', {
+    stepUpToken,
+  });
   const response = await startAuthentication({ optionsJSON: options as never });
-  return api.post('auth/admin/passkey/login/verify', { response });
+  return api.post('auth/admin/passkey/login/verify', { response, stepUpToken });
 }
 
 /** يعمل بجلسة كاملة أو بتوكن تسجيل (أول دخول) — لذا يُمرَّر العميل المناسب */
