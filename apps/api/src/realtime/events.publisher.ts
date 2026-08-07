@@ -71,6 +71,30 @@ export class EventsPublisher {
     return { eventId: randomUUID(), at: new Date().toISOString() };
   }
 
+  // ───────────────────── إسقاط ما لم يعد مأذوناً ─────────────────────
+
+  @OnEvent('session.revoked')
+  onSessionRevoked(e: SessionRevokedDomainEvent) {
+    this.gateway.disconnectFamily(e.userId, e.familyId, 'session revoked');
+  }
+
+  @OnEvent('user.blocked')
+  onUserBlocked(e: UserBlockedDomainEvent) {
+    this.gateway.disconnectUser(e.userId, 'user blocked');
+  }
+
+  @OnEvent('approval.decided')
+  onApprovalDecided(e: ApprovalDecidedDomainEvent) {
+    // القطع على كل قرار لا على الرفض وحده: الترقية إلى «موافَق» تحتاج
+    // مصافحة جديدة كي ينضم إلى غرف العمل.
+    this.gateway.disconnectUser(e.userId, 'approval decided');
+  }
+
+  @OnEvent('driver.availability')
+  onDriverAvailability(e: DriverAvailabilityDomainEvent) {
+    void this.gateway.syncDriverAvailability(e.userId, e.cityId, e.isAvailable);
+  }
+
   @OnEvent('order.created')
   onOrderCreated(e: OrderCreatedDomainEvent) {
     const payload: NewOrderEvent = {
@@ -149,3 +173,31 @@ export class EventsPublisher {
     this.gateway.server.emit('config:updated', payload);
   }
 }
+
+// ─────────────────────── إسقاط الاتصالات القائمة ───────────────────────
+
+/**
+ * المصافحة تفحص الحالة **مرة واحدة**، فكل تغيّر بعدها لا يبلغ الاتصال
+ * القائم ما لم يُقطع. والقطع كافٍ: العميل يعيد الاتصال بتوكن حيّ فيُعاد
+ * تقييمه بحالته الجديدة — أو يُرفض إن لم يعد مأذوناً.
+ */
+
+export interface SessionRevokedDomainEvent {
+  userId: string;
+  familyId: string;
+}
+
+export interface UserBlockedDomainEvent {
+  userId: string;
+}
+
+export interface ApprovalDecidedDomainEvent {
+  userId: string;
+}
+
+export interface DriverAvailabilityDomainEvent {
+  userId: string;
+  cityId: string;
+  isAvailable: boolean;
+}
+

@@ -5,6 +5,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { JwtService, type JwtSignOptions } from '@nestjs/jwt';
 import { AuthTokens, UserStatus } from '@superapp/shared';
 import { and, eq, isNull } from 'drizzle-orm';
@@ -60,6 +61,7 @@ export class TokenService {
     private readonly config: ConfigService,
     @Inject(DB) private readonly db: DbClient,
     private readonly events: AuthEventsService,
+    private readonly emitter: EventEmitter2,
   ) {}
 
   /** زوج جديد بسلالة (family) جديدة — عند التسجيل أو الدخول */
@@ -169,10 +171,17 @@ export class TokenService {
   }
 
   async revokeFamily(familyId: string): Promise<void> {
-    await this.db
+    const revoked = await this.db
       .update(refreshTokens)
       .set({ revokedAt: new Date() })
-      .where(and(eq(refreshTokens.familyId, familyId), isNull(refreshTokens.revokedAt)));
+      .where(and(eq(refreshTokens.familyId, familyId), isNull(refreshTokens.revokedAt)))
+      .returning({ userId: refreshTokens.userId });
+
+    // نقطة الاختناق الوحيدة للإبطال: يمرّ بها الخروج وإبطال اللوحة وكشف
+    // إعادة الاستعمال. إبطال رمز التحديث كان يقطع REST ولا يمسّ الـsocket،
+    // فيبقى اتصال أدمن في غرفة الإدارة يستقبل أحداث الطلبات والمال.
+    const userId = revoked[0]?.userId;
+    if (userId) this.emitter.emit('session.revoked', { userId, familyId });
   }
 
   private async createPair(
@@ -184,7 +193,10 @@ export class TokenService {
     const refreshTtl = this.config.getOrThrow<string>('JWT_REFRESH_TTL');
 
     const accessToken = await this.jwt.signAsync(
-      { sub: user.id, role: user.role, phone: user.phone },
+      // ‏fid يربط الاتصال بعائلة جلسته، فيُقطع socket الجلسة المُبطَلة وحدها
+      // دون بقية أجهزة المستخدم. التوكنات القديمة بلا fid تُقطع مع أي إبطال
+      // يخص صاحبها — فشل إلى الجانب الآمن.
+      { sub: user.id, role: user.role, phone: user.phone, fid: familyId },
       {
         secret: this.config.getOrThrow<string>('JWT_ACCESS_SECRET'),
         expiresIn: accessTtl as JwtSignOptions['expiresIn'],

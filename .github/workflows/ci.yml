@@ -130,10 +130,11 @@ jobs:
               -e 's|^ADMIN_IMAGE=.*|ADMIN_IMAGE=superapp-admin:latest|' \
               .env.prod.example > .env.prod
 
-      # الحزمة تنضم إلى شبكة الحافة المشتركة — تُنشأ مرة على الخادم، وهنا
-      # في كل تشغيل.
-      - name: Create the shared edge network
-        run: docker network create superapp-edge
+      # شبكة حافة **لكل حزمة** لا واحدة مشتركة: بشبكة واحدة تصل حاوية
+      # التجربة مباشرة إلى prod-api بلا مرور بـCaddy. الاسم يتبع STACK_NAME،
+      # وهو هنا `ci`. تُنشأ مرة على الخادم، وفي كل تشغيل هنا.
+      - name: Create the stack edge network
+        run: docker network create "superapp-edge-${STACK_NAME}"
 
       - name: Validate Caddyfile
         run: |
@@ -148,6 +149,20 @@ jobs:
 
       - name: Validate compose file
         run: docker compose -f docker-compose.prod.yml --env-file .env.prod config --quiet
+
+      # عودة الحزمتين إلى شبكة واحدة تعيد الانتقال الجانبي من التجربة إلى
+      # الإنتاج بلا أن يسقط أي فحص آخر — الفصل يجب أن يُقاس لا أن يُفترض.
+      - name: The two stacks must not share an edge network
+        run: |
+          net() {
+            STACK_NAME="$1" docker compose -f docker-compose.prod.yml --env-file .env.prod config \
+              | grep -o 'superapp-edge-[a-z0-9_-]*' | head -1
+          }
+          prod=$(net prod)
+          stage=$(net stage)
+          echo "prod=$prod stage=$stage"
+          [ -n "$prod" ] && [ -n "$stage" ] || { echo 'تعذّر قراءة اسم شبكة الحافة' >&2; exit 1; }
+          [ "$prod" != "$stage" ] || { echo 'الحزمتان على شبكة الحافة نفسها' >&2; exit 1; }
 
       - name: Build production images
         run: docker compose -f docker-compose.prod.yml -f docker-compose.build.yml --env-file .env.prod build
