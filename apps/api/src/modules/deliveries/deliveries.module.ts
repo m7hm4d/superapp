@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { PinGuardService } from '../../common/pin-guard.service';
 import { LedgerModule } from '../ledger/ledger.module';
 import { OrdersModule } from '../orders/orders.module';
 import { BatchingService } from './batching.service';
@@ -21,6 +22,6 @@ import { VendorBatchesController } from './vendor-batches.controller';
     DriverDeliveriesController,
     VendorBatchesController,
   ],
-  providers: [BatchingService, DriversService],
+  providers: [BatchingService, DriversService, PinGuardService],
 })
 export class DeliveriesModule {}

@@ -9,6 +9,9 @@ const baseClient = createApiClient({
   baseUrl: process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000',
   storage,
   onUnauthorized: () => authStore.getState().setLoggedOut(),
+  // ‏__DEV__ ثابت يستبدله Metro وقت البناء: نسخة الإصدار تصير `false`
+  // فيُرفض أي عنوان غير https قبل أول طلب.
+  allowInsecureHttp: __DEV__,
 });
 
 /** استخراج code من ApiError بأمان (duck-typing كي لا نعتمد على instanceof عبر الحزم) */
@@ -82,10 +85,14 @@ export const api: ApiClient = {
 
 export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
 
-/** تسجيل خروج يدوي: مسح التوكنات ثم تحويل الحالة إلى ضيف */
+/**
+ * تسجيل خروج يدوي: إبطال الجلسة على الخادم ثم تحويل الحالة إلى ضيف.
+ *
+ * كان يمسح التوكنات محلياً فقط، فيبقى رمز التحديث صالحاً على الخادم.
+ */
 export async function logout(): Promise<void> {
   try {
-    await storage.clear();
+    await api.logout();
   } finally {
     useApprovalStore.getState().clear();
     authStore.getState().setLoggedOut();
