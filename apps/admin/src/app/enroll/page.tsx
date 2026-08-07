@@ -21,7 +21,7 @@ import { hasEnrollmentToken } from '@/lib/storage';
 const ERROR_AR: Record<string, string> = {
   TOTP_INVALID: 'الرمز غير صحيح — جرّب الرمز الظاهر الآن في التطبيق',
   TOTP_NOT_SETUP: 'انتهت مهلة التسجيل — أعد تسجيل الدخول',
-  TOTP_ENROLLMENT_REQUIRED: 'انتهت مهلة التسجيل — أعد تسجيل الدخول',
+  TOKEN_SCOPE_FORBIDDEN: 'انتهت مهلة التسجيل — أعد تسجيل الدخول',
   INVALID_TOKEN: 'انتهت مهلة التسجيل — أعد تسجيل الدخول',
   NO_TOKEN: 'انتهت مهلة التسجيل — أعد تسجيل الدخول',
   VALIDATION_ERROR: 'أدخل رمزاً من ٦ أرقام',

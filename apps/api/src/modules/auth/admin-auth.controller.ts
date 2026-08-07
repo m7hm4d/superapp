@@ -4,14 +4,14 @@ import { z } from 'zod';
 import { authContextFrom } from '../../common/auth-context';
 import { AuthThrottle } from '../../common/auth-throttle';
 import {
-  AllowTotpEnrollment,
+  AllowScopes,
   CurrentUser,
   Public,
   Roles,
   type RequestUser,
 } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod.pipe';
-import { AdminAuthService } from './admin-auth.service';
+import { AdminAuthService, TOTP_ENROLLMENT_SCOPE } from './admin-auth.service';
 import { PasskeyService } from './passkey.service';
 
 const zTotpToken = z.object({ totp: z.string().regex(/^\d{6}$/) });
@@ -49,7 +49,7 @@ export class AdminAuthController {
   }
 
   @Roles(Role.ADMIN)
-  @AllowTotpEnrollment()
+  @AllowScopes(TOTP_ENROLLMENT_SCOPE)
   @Post('totp/setup')
   setupTotp(@CurrentUser() user: RequestUser) {
     return this.adminAuth.setupTotp(user.id);
@@ -57,7 +57,7 @@ export class AdminAuthController {
 
   /** يعيد جلسة كاملة عند النجاح — فينتهي التسجيل بالمستخدم داخل اللوحة مباشرة */
   @Roles(Role.ADMIN)
-  @AllowTotpEnrollment()
+  @AllowScopes(TOTP_ENROLLMENT_SCOPE)
   @AuthThrottle()
   @HttpCode(200)
   @Post('totp/enable')
@@ -101,7 +101,7 @@ export class AdminAuthController {
 
   /** التسجيل متاح للجلسة الكاملة ولتوكن التسجيل — فيختار الأدمن الجديد مفتاحاً بدل TOTP */
   @Roles(Role.ADMIN)
-  @AllowTotpEnrollment()
+  @AllowScopes(TOTP_ENROLLMENT_SCOPE)
   @HttpCode(200)
   @Post('passkey/register/options')
   passkeyRegisterOptions(@CurrentUser() user: RequestUser) {
@@ -109,7 +109,7 @@ export class AdminAuthController {
   }
 
   @Roles(Role.ADMIN)
-  @AllowTotpEnrollment()
+  @AllowScopes(TOTP_ENROLLMENT_SCOPE)
   @HttpCode(200)
   @Post('passkey/register/verify')
   passkeyRegisterVerify(

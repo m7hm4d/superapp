@@ -130,7 +130,8 @@ describe('admin TOTP is mandatory', () => {
       .get('/api/v1/admin/finance/summary')
       .set('Authorization', `Bearer ${enrollmentToken}`)
       .expect(401);
-    expect(blocked.body.code).toBe('TOTP_ENROLLMENT_REQUIRED');
+    // الرمز صار عاماً: النطاق يُفحص بقيمته، وكل نطاق محدود يُرفض هنا
+    expect(blocked.body.code).toBe('TOKEN_SCOPE_FORBIDDEN');
 
     // لكنه يفتح الإعداد ويعيد سراً ورابط otpauth الذي يصير باركود في اللوحة
     const setup = await request(http)

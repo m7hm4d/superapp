@@ -42,9 +42,15 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       const token: string | undefined =
         client.handshake.auth?.token ?? (client.handshake.headers['authorization'] as string)?.slice(7);
       if (!token) throw new Error('no token');
-      const payload = await this.jwt.verifyAsync<{ sub: string; role: Role }>(token, {
-        secret: this.config.getOrThrow('JWT_ACCESS_SECRET'),
-      });
+      const payload = await this.jwt.verifyAsync<{ sub: string; role: Role; scope?: string }>(
+        token,
+        { secret: this.config.getOrThrow('JWT_ACCESS_SECRET') },
+      );
+
+      // التوكنات المحدودة (تسجيل، أو خطوة ثانية بكلمة المرور وحدها) ليست
+      // جلسات. بلا هذا الفحص ينضم من يعرف كلمة المرور فقط إلى غرفة الأدمن
+      // ويستقبل أحداث الطلبات والتسويات قبل أن يجتاز عاملاً ثانياً.
+      if (payload.scope) throw new Error('scoped token is not a session');
 
       const data: SocketAuthData = { userId: payload.sub, role: payload.role };
       client.data = data;

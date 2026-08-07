@@ -7,13 +7,13 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
-import { ALLOW_TOTP_ENROLLMENT_KEY, IS_PUBLIC_KEY } from './decorators';
+import { ALLOWED_SCOPES_KEY, IS_PUBLIC_KEY } from './decorators';
 
 export interface AccessTokenPayload {
   sub: string;
   role: string;
   phone: string;
-  /** يوجد فقط في التوكنات المحدودة (تسجيل TOTP) — غيابه يعني جلسة كاملة */
+  /** يوجد فقط في التوكنات المحدودة — غيابه يعني جلسة كاملة */
   scope?: string;
 }
 
@@ -46,14 +46,16 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException({ code: 'INVALID_TOKEN' });
     }
 
-    // التوكن المحدود (تسجيل TOTP) لا يفتح إلا المسارات التي تعلن قبوله صراحةً
+    // التوكن المحدود لا يفتح إلا المسارات التي تعلن قبول **نطاقه بالاسم**.
+    // المقارنة بالقيمة لا بالوجود: توكن الخطوة الثانية وتوكن التسجيل كلاهما
+    // يحمل `scope`، ولكلٍّ منهما مسارات مختلفة تماماً.
     if (payload.scope) {
-      const allowsEnrollment = this.reflector.getAllAndOverride<boolean>(
-        ALLOW_TOTP_ENROLLMENT_KEY,
-        [context.getHandler(), context.getClass()],
-      );
-      if (!allowsEnrollment) {
-        throw new UnauthorizedException({ code: 'TOTP_ENROLLMENT_REQUIRED' });
+      const allowed = this.reflector.getAllAndOverride<string[] | undefined>(ALLOWED_SCOPES_KEY, [
+        context.getHandler(),
+        context.getClass(),
+      ]);
+      if (!allowed?.includes(payload.scope)) {
+        throw new UnauthorizedException({ code: 'TOKEN_SCOPE_FORBIDDEN' });
       }
     }
 
