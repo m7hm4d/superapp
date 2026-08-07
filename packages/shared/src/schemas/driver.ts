@@ -27,29 +27,80 @@ export const zReportException = z.object({
   note: z.string().max(500).optional(),
 });
 
-export interface BatchStopView {
-  orderId: string;
-  orderCode: string;
-  sequence: number;
-  status: string;
-  addressText: string;
-  landmark?: string | null;
-  lat: number;
-  lng: number;
-  totalIqd: number; // المبلغ الواجب تحصيله
-  contactPhoneMasked: string;
-}
+/**
+ * الاستجابات مخططات لا واجهات مجرّدة.
+ *
+ * الواجهة تُمحى عند التصريف فلا يبقى منها شيء وقت التشغيل — فلا يمكن
+ * توليد عقد منها، ولا التحقق من أن ما يرسله الخادم يطابقها. المخطط يبقى
+ * قيمة حقيقية: منه يُولَّد OpenAPI، ومنه تُشتقّ نماذج Dart.
+ *
+ * والواجهات أدناه `z.infer` من المخططات لا تعريفات مستقلة — فأي انحراف
+ * بين الاثنين يصير خطأ تصريف لا مفاجأة وقت التشغيل.
+ */
+export const zBatchStopView = z.object({
+  orderId: zUuid,
+  orderCode: z.string(),
+  sequence: z.number().int(),
+  status: z.string(),
+  addressText: z.string(),
+  landmark: z.string().nullish(),
+  lat: z.number(),
+  lng: z.number(),
+  /** المبلغ الواجب تحصيله من هذا العميل */
+  totalIqd: z.number().int(),
+  /** مقنّع من الخادم — لا يُرسل الرقم الكامل إلى التطبيق */
+  contactPhoneMasked: z.string(),
+});
 
-export interface BatchView {
-  id: string;
-  status: string;
-  vendorNameAr: string;
-  vendorLat: number;
-  vendorLng: number;
-  vendorAddressText: string;
-  ordersCount: number;
-  totalFeeIqd: number;
-  totalCashIqd: number;
-  offerExpiresAt?: string | null;
-  stops: BatchStopView[];
-}
+export const zBatchView = z.object({
+  id: zUuid,
+  status: z.string(),
+  vendorNameAr: z.string(),
+  vendorLat: z.number(),
+  vendorLng: z.number(),
+  vendorAddressText: z.string(),
+  ordersCount: z.number().int(),
+  totalFeeIqd: z.number().int(),
+  totalCashIqd: z.number().int(),
+  offerExpiresAt: z.string().nullish(),
+  stops: z.array(zBatchStopView),
+});
+
+/** توقف كما يراه السائق: يضيف وقت التسليم */
+export const zDriverBatchStop = zBatchStopView.extend({
+  deliveredAt: z.string().nullable(),
+});
+
+export const zDriverBatchView = zBatchView.extend({
+  stops: z.array(zDriverBatchStop),
+});
+
+export const zDriverLedger = z.object({
+  todayDeliveredCount: z.number().int(),
+  todayFeesIqd: z.number().int(),
+  /** النقد الذي بعهدة السائق ولم يُسوَّ بعد */
+  cashOnHandIqd: z.number().int(),
+  owed: z.array(
+    z.object({
+      vendorId: zUuid,
+      vendorNameAr: z.string(),
+      amountIqd: z.number().int(),
+    }),
+  ),
+  settlements: z.array(
+    z.object({
+      id: zUuid,
+      vendorId: zUuid,
+      vendorNameAr: z.string(),
+      amountIqd: z.number().int(),
+      status: z.string(),
+      createdAt: z.string(),
+    }),
+  ),
+});
+
+export type BatchStopView = z.infer<typeof zBatchStopView>;
+export type BatchView = z.infer<typeof zBatchView>;
+export type DriverBatchStop = z.infer<typeof zDriverBatchStop>;
+export type DriverBatchView = z.infer<typeof zDriverBatchView>;
+export type DriverLedger = z.infer<typeof zDriverLedger>;

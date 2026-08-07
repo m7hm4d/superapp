@@ -11,7 +11,10 @@
     "db:seed": "ts-node -r tsconfig-paths/register src/db/seed/seed.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "gen:openapi": "ts-node -r tsconfig-paths/register scripts/generate-openapi.ts",
+    "gen:dart": "ts-node -r tsconfig-paths/register scripts/generate-dart-models.ts",
+    "gen:contract": "pnpm gen:openapi && pnpm gen:dart"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.6",
