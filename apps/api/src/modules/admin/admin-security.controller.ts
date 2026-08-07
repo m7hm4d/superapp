@@ -1,9 +1,8 @@
 import { Controller, Get, HttpCode, Param, Post, Query, Req } from '@nestjs/common';
-import { Role, zPagination, zUuid } from '@superapp/shared';
+import { AUTH_EVENT_OUTCOMES, Role, zPagination, zUuid } from '@superapp/shared';
 import { z } from 'zod';
 import { CurrentUser, Roles, type RequestUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod.pipe';
-import { authEvents } from '../../db/schema';
 import { AuthEventsService } from '../auth/auth-events.service';
 import { TokenService } from '../auth/token.service';
 import { AuditService, type RequestWithId } from './audit.service';
@@ -11,7 +10,7 @@ import { AuditService, type RequestWithId } from './audit.service';
 export const zAuthEventsQuery = z
   .object({
     userId: zUuid.optional(),
-    outcome: z.enum(authEvents.outcome.enumValues).optional(),
+    outcome: z.enum(AUTH_EVENT_OUTCOMES).optional(),
     from: z.coerce.date().optional(),
     to: z.coerce.date().optional(),
   })

@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { OrderDirectoryModule } from '../orders/order-directory.module';
 import { DriverDirectoryModule } from '../deliveries/driver-directory.module';
 import { VendorsModule } from '../vendors/vendors.module';
 import { PinGuardService } from '../../common/pin-guard.service';
@@ -13,7 +14,7 @@ import { VendorLedgerController } from './vendor-ledger.controller';
  * وSettlementsService مُصدَّر لحسم الاعتراضات من وحدة الإدارة.
  */
 @Module({
-  imports: [DriverDirectoryModule, VendorsModule],
+  imports: [OrderDirectoryModule, DriverDirectoryModule, VendorsModule],
   controllers: [DriverLedgerController, VendorLedgerController],
   providers: [LedgerService, SettlementsService, PinGuardService],
   exports: [LedgerService, SettlementsService],

@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ExceptionQueriesModule } from '../deliveries/exception-queries.module';
 import { AuthModule } from '../auth/auth.module';
 import { FlagsModule } from '../flags/flags.module';
 import { LedgerModule } from '../ledger/ledger.module';
@@ -16,7 +17,7 @@ import { AuditService } from './audit.service';
 import { OpsService } from './ops.service';
 
 @Module({
-  imports: [OrdersModule, FlagsModule, LedgerModule, AuthModule],
+  imports: [ExceptionQueriesModule, OrdersModule, FlagsModule, LedgerModule, AuthModule],
   controllers: [
     AdminApprovalsController,
     AdminOrdersController,

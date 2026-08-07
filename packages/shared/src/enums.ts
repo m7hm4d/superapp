@@ -121,3 +121,28 @@ export const CATEGORY_FLAG_BY_CATEGORY: Record<VendorCategory, FeatureFlagKey> =
   [VendorCategory.MARKET]: FeatureFlagKey.CATEGORY_MARKET,
   [VendorCategory.CONSTRUCTION]: FeatureFlagKey.CATEGORY_CONSTRUCTION,
 };
+
+/**
+ * نتائج محاولات المصادقة كما تُقيَّد في سجل الدخول.
+ *
+ * هنا لا في مخطط قاعدة البيانات: الواجهات تصفّي بها، وكانت اللوحة تستوردها
+ * من `authEvents.outcome.enumValues` — أي أن وحدةً تعبر حدّ وحدة أخرى لأجل
+ * قائمة قيم، لا لأجل بيانات. القيم عقد مشترك، ومكانها حيث بقية العقود.
+ */
+export const AUTH_EVENT_OUTCOMES = [
+  'success',
+  'invalid_credentials',
+  'unknown_identifier',
+  'totp_required',
+  'totp_invalid',
+  'totp_replayed',
+  'enrollment_required',
+  'enrollment_completed',
+  'blocked',
+  'admin_login_denied',
+  'refresh_reuse',
+  'logout',
+  'session_revoked',
+] as const;
+export type AuthEventOutcome = (typeof AUTH_EVENT_OUTCOMES)[number];
+
