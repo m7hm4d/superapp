@@ -27,8 +27,12 @@ services:
       # داخلية بدل أن يقصد Let's Encrypt لنطاق لا وجود له في DNS.
       STAGE_ADMIN_DOMAIN: ${STAGE_ADMIN_DOMAIN:-stage-admin.localhost}
       STAGE_API_DOMAIN: ${STAGE_API_DOMAIN:-stage-api.localhost}
+      # النطاق الجذر للصفحة التعريفية
+      SITE_DOMAIN: ${SITE_DOMAIN:-4irq.com}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # الصفحة التعريفية: ملفات ساكنة للقراءة فقط
+      - ./site:/srv/site:ro
       # الشهادات هنا — فقدان هذا الحجم يعني إعادة إصدار واصطداماً بحدود
       # المعدل عند التكرار.
       - caddy_data:/data
