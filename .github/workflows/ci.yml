@@ -150,7 +150,7 @@ jobs:
         run: |
           flutter pub get
           flutter analyze
-          flutter test"
+          flutter test
 
   # حزمة النشر لا يلمسها job الاختبارات إطلاقاً: ملفات Compose وCaddy
   # وDockerfileات تُكسر بصمت ولا يُكتشف ذلك إلا على الخادم. يعمل بالتوازي
