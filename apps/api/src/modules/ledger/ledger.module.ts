@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { VendorsModule } from '../vendors/vendors.module';
 import { PinGuardService } from '../../common/pin-guard.service';
 import { DriverLedgerController } from './driver-ledger.controller';
 import { LedgerService } from './ledger.service';
@@ -11,6 +12,7 @@ import { VendorLedgerController } from './vendor-ledger.controller';
  * وSettlementsService مُصدَّر لحسم الاعتراضات من وحدة الإدارة.
  */
 @Module({
+  imports: [VendorsModule],
   controllers: [DriverLedgerController, VendorLedgerController],
   providers: [LedgerService, SettlementsService, PinGuardService],
   exports: [LedgerService, SettlementsService],

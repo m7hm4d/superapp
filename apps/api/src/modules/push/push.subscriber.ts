@@ -2,7 +2,8 @@ import { Inject, Injectable } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { eq } from 'drizzle-orm';
 import { DB, DbClient } from '../../db/drizzle.module';
-import { driverProfiles, vendorProfiles } from '../../db/schema';
+import { driverProfiles } from '../../db/schema';
+import { VendorDirectoryService } from '../vendors/vendor-directory.service';
 import type {
   BatchOfferedDomainEvent,
   OrderCreatedDomainEvent,
@@ -18,16 +19,13 @@ import { PushService } from './push.service';
 export class PushSubscriber {
   constructor(
     private readonly push: PushService,
+    private readonly vendors: VendorDirectoryService,
     @Inject(DB) private readonly db: DbClient,
   ) {}
 
   @OnEvent('order.created')
   async onOrderCreated(e: OrderCreatedDomainEvent) {
-    const [vendor] = await this.db
-      .select({ userId: vendorProfiles.userId })
-      .from(vendorProfiles)
-      .where(eq(vendorProfiles.id, e.vendorProfileId))
-      .limit(1);
+    const vendor = await this.vendors.summaryFor(e.vendorProfileId);
     if (!vendor) return;
     await this.push.sendToUsers([vendor.userId], {
       title: 'طلب جديد! 🍞',

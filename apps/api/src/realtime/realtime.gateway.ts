@@ -12,7 +12,8 @@ import { eq, inArray } from 'drizzle-orm';
 import { Server, Socket } from 'socket.io';
 import { DEFAULT_CORS_ORIGINS } from '../config/env.schema';
 import { DB, DbClient } from '../db/drizzle.module';
-import { driverProfiles, users, vendorProfiles } from '../db/schema';
+import { driverProfiles, users } from '../db/schema';
+import { VendorDirectoryService } from '../modules/vendors/vendor-directory.service';
 
 interface SocketAuthData {
   userId: string;
@@ -73,6 +74,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     @Inject(DB) private readonly db: DbClient,
+    private readonly vendors: VendorDirectoryService,
   ) {
     // توكن الوصول يعيش خمس عشرة دقيقة، والاتصال قد يعيش أياماً. بلا هذا
     // الكنس يبقى الوصول قائماً بعد انتهاء ما أذن به — والعميل يعيد الاتصال
@@ -134,11 +136,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       await client.join(SocketRooms.user(payload.sub));
 
       if (role === Role.VENDOR) {
-        const [vp] = await this.db
-          .select({ id: vendorProfiles.id, approvalStatus: vendorProfiles.approvalStatus })
-          .from(vendorProfiles)
-          .where(eq(vendorProfiles.userId, payload.sub))
-          .limit(1);
+        const vp = await this.vendors.summaryForUser(payload.sub);
         // غرفة المتجر مشروطة بالموافقة — نظير ApprovedGuard على REST
         if (vp && vp.approvalStatus === ApprovalStatus.APPROVED) {
           data.vendorProfileId = vp.id;

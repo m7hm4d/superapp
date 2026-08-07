@@ -18,6 +18,7 @@ import type { DriverBatchView, LatLng } from '@superapp/shared';
 import { and, asc, eq, gt, inArray, isNull, notExists, sql } from 'drizzle-orm';
 import { PinGuardService } from '../../common/pin-guard.service';
 import { DB, DbClient } from '../../db/drizzle.module';
+import { VendorDirectoryService } from '../vendors/vendor-directory.service';
 import {
   batchOrders,
   batches,
@@ -83,6 +84,7 @@ export class DriversService {
     private readonly ledgerService: LedgerService,
     private readonly emitter: EventEmitter2,
     private readonly pinGuard: PinGuardService,
+    private readonly vendors: VendorDirectoryService,
   ) {}
 
   // ─────────────────────────────── الملف الشخصي ───────────────────────────────
@@ -180,11 +182,7 @@ export class DriversService {
    * رمز الاستلام واسم السائق القادم وأكواد طلبات الدفعة.
    */
   async listActiveBatchesForVendor(vendorUserId: string): Promise<VendorActiveBatchView[]> {
-    const [vendor] = await this.db
-      .select({ id: vendorProfiles.id })
-      .from(vendorProfiles)
-      .where(eq(vendorProfiles.userId, vendorUserId))
-      .limit(1);
+    const vendor = await this.vendors.summaryForUser(vendorUserId);
     if (!vendor) {
       throw new NotFoundException({ code: 'NO_PROFILE' });
     }
