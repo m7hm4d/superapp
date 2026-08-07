@@ -101,6 +101,11 @@ jobs:
       - name: Check workflows for expression injection
         run: python3 scripts/check-workflow-injection.py
 
+      # حدود الوحدات: لكل جدول وحدة تملكه. القائمة تبدأ بالخروق القائمة
+      # فتمرّ اليوم، وتُفرَّغ لا تُملأ — والفحص يسقط على أي خرق جديد.
+      - name: Check module data-ownership boundaries
+        run: python3 scripts/check-module-boundaries.py
+
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           version: 11.9.0

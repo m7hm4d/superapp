@@ -1,0 +1,56 @@
+{
+  "_": [
+    "ملكية الجداول: لكل جدول وحدة واحدة تملكه، ومن أراد بياناته ناداها.",
+    "",
+    "المالك هو **من يشغّل** لا من يكتب أكثر. استُخرج من الشيفرة لا من الرأي:",
+    "  auth يكتب  = إنشاء عند التسجيل        (insert users/vendorProfiles/driverProfiles)",
+    "  admin يكتب = قرار إداري على بيانات غيره (setUserStatus, decideApproval, حل الاستثناء)",
+    "  المجال يكتب = تشغيل يومي               (setOpen, setAvailability, pingLocation)",
+    "",
+    "فالاثنان الأولان يصيران منافذ معلنة في وحدة المالك، لا استعلاماً مباشراً.",
+    "",
+    "لتغيير مالك: عدّل السطر هنا وحده — لا شيء آخر يعرف بالملكية."
+  ],
+
+  "owners": {
+    "orders": "orders",
+    "orderItems": "orders",
+    "orderEvents": "orders",
+
+    "batches": "deliveries",
+    "batchOrders": "deliveries",
+    "driverProfiles": "deliveries",
+    "exceptions": "deliveries",
+
+    "settlements": "ledger",
+    "ledgerEntries": "ledger",
+
+    "vendorProfiles": "vendors",
+    "products": "vendors",
+
+    "users": "auth",
+    "refreshTokens": "auth",
+    "adminCredentials": "auth",
+    "adminPasskeys": "auth",
+    "webauthnChallenges": "auth",
+    "authEvents": "auth",
+
+    "pushTokens": "push",
+
+    "cities": "flags",
+    "featureFlags": "flags",
+    "tenants": "flags",
+
+    "adminAuditLog": "admin",
+
+    "pinAttempts": "common",
+    "idempotencyKeys": "common"
+  },
+
+  "_notes": {
+    "cities": "لا مالك بديهي: admin وحده يكتبه وأربع وحدات تقرؤه. وضعُه في admin يجعل الجميع يعتمد على واجهة الإدارة — عكس المطلوب. فذهب إلى flags لأنها بالفعل وحدة الإعدادات (featureFlags من الشكل نفسه: يكتبها واحد ويقرؤها الكل). إن أردت اسماً أصدق فأعد تسمية flags إلى config.",
+    "users": "auth ينشئ الهوية ويملك كل ما يتصل بها. setUserStatus في admin قرار إداري يصير منفذاً.",
+    "admin": "لا يملك إلا سجلّ تدقيقه. هو واجهة فوق المجالات لا مالك بيانات — وهذا مقصود، وهو ما تعالجه المرحلة الرابعة.",
+    "common": "ليست وحدة مجال بل بنية تحتية (حارس PIN، مفاتيح التكرار). تملك جداولها ولا يقرؤها أحد غيرها."
+  }
+}
