@@ -34,7 +34,9 @@ describe('M1 acceptance', () => {
   let productId = '';
 
   beforeAll(async () => {
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     await app.init();
@@ -48,6 +50,7 @@ describe('M1 acceptance', () => {
   it('health: up with db', async () => {
     const res = await request(http).get('/api/v1/health').expect(200);
     expect(res.body.db).toBe('up');
+    expect(res.body.revision).toBe(process.env.APP_REVISION ?? 'unknown');
   });
 
   it('auth: customer registers and logs in', async () => {
@@ -160,9 +163,13 @@ describe('M1 acceptance', () => {
 
   it('customer: sees the bakery on the map (PostGIS nearby)', async () => {
     const res = await request(http)
-      .get(`/api/v1/vendors/nearby?lat=${KARRADA.lat}&lng=${KARRADA.lng}&radius=3000`)
+      .get(
+        `/api/v1/vendors/nearby?lat=${KARRADA.lat}&lng=${KARRADA.lng}&radius=3000`,
+      )
       .expect(200);
-    const found = res.body.find((v: { id: string }) => v.id === vendorProfileId);
+    const found = res.body.find(
+      (v: { id: string }) => v.id === vendorProfileId,
+    );
     expect(found).toBeTruthy();
     expect(found.isOpen).toBe(true);
     expect(typeof found.distanceM).toBe('number');

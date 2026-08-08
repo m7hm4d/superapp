@@ -156,8 +156,12 @@ openssl rand -base64 36
 عبّئ `JWT_ACCESS_SECRET` و`JWT_REFRESH_SECRET` و`POSTGRES_PASSWORD` بقيم مولّدة،
 واضبط `DATABASE_URL` بكلمة المرور نفسها.
 
-> ‏`NEXT_PUBLIC_API_URL` يُخبَز في حزمة المتصفح وقت البناء، وتغييره لاحقاً يستلزم
-> `--build` لا `restart`. وقيمته الأصل وحده — عميل الـAPI يضيف `/api/v1` بنفسه.
+اترك `APP_REVISION` على القيمة الصفرية الموجودة في ملف المثال. ليست سراً ولا
+إعداداً يدوياً؛ يستبدلها `deploy.sh` داخل snapshot النشر بالـSHA الكامل الذي
+ثبتت هويته، ويشتقها `compose.sh` من صورتي التطبيق العاملتين عند الأوامر اليدوية.
+
+> ‏`NEXT_PUBLIC_API_URL` له قيمة بناء احتياطية، لكن الإنتاج يحقن `API_URL`
+> وقت التشغيل. وقيمته الأصل وحده — عميل الـAPI يضيف `/api/v1` بنفسه.
 
 ### ٤. أدوات التحقق
 
@@ -175,10 +179,13 @@ sudo install -m 755 cosign /usr/local/bin/cosign && rm cosign
 ### ٥. الإقلاع
 
 ```bash
-./deploy/deploy.sh
+./deploy/deploy.sh --expected-stack prod \
+  sha-0123456789abcdef0123456789abcdef01234567
 ```
 
-يسحب آخر صور منشورة، **ويتحقق من توقيعها قبل تشغيلها**، ثم يُقلع الحزمة.
+استبدل المثال بـSHA الكامل لدمج `main` المنشور. لا توجد قيمة افتراضية ولا
+يُقبل `latest`. يسحب الإصدار المحدد، **ويتحقق من توقيعه وcommit المصدر قبل
+تشغيله**، ثم يأخذ نسخة من PostgreSQL ويطبّق الهجرة ويُقلع الحزمة.
 صورة لم تخرج من `publish.yml` في هذا المستودع لا تعمل — ولو دُفعت إلى الوسم
 نفسه. والتشغيل يتم بالـ`digest` لا بالوسم، فما جرى التحقق منه هو بالضبط ما
 يعمل.
@@ -206,18 +213,24 @@ sudo install -m 755 cosign /usr/local/bin/cosign && rm cosign
 
 ### العودة إلى إصدار سابق
 
-كل نشرة تحمل وسمها: `sha-<short>` من كل دمج، و`v1.2.3` (و`v1.2` و`v1`) من كل
-إصدار — **وسم الصورة يطابق وسم git حرفياً**، فلا ترجمة بينهما. الصورة موقَّعة ومحفوظة منذ نُشرت، فالعودة **لا تحتاج بناءً ولا
-`git revert`**:
+كل دمج معتمد من `main` يحمل `sha-<40-hex>`. يسجل GitHub Release مثل
+`v1.2.3` الـdigest الدقيق لكل صورة، ولا ينشئ وسم GHCR باسم الإصدار.
+يقبل `deploy.sh` SHA المصدر الكامل فقط.
+
+العودة الآلية عند فشل صحة نشرة جديدة تعيد صورتي التطبيق السابقتين الموثوقتين
+بالـdigest، ولا تعيد تشغيل migration، لكنها تبقي أمر النشر فاشلاً وتثبت SHA
+السابق خارجياً. أما العودة اليدوية إلى SHA أقدم فتمر بمسار النشر الآمن كاملاً:
+backup جديد، وتحقق التوقيع، وmigration forward-only، وفحوص الصحة. لا تحتاج
+إعادة بناء أو `git revert`، لكنها ليست وعداً بالانتهاء خلال ثوانٍ:
 
 ```bash
-./deploy/deploy.sh v1.1.0
+./deploy/deploy.sh --expected-stack prod \
+  sha-89abcdef0123456789abcdef0123456789abcdef
 ```
 
-يسحب، يتحقق من التوقيع، ويُقلع بالـ`digest`. ثوانٍ لا دقائق.
-
-**ما نشرتَه ومتى** في `.deploy/<stack>-history.tsv` — سطر لكل نشرة بالزمن
-والوسم والـdigest. بلا هذا السجل تصير العودة تخميناً لرقم.
+**ما نشرتَه ومتى** في `.deploy/<stack>-history.tsv` — سطر لكل نشرة ناجحة
+بالزمن والوسم وdigest الصورتين والإصدار السابق ومسار النسخة الاحتياطية وSHA-256
+لـsnapshot ملف البيئة المستعملة.
 
 ```bash
 tail -5 .deploy/prod-history.tsv
@@ -266,11 +279,13 @@ cp .env.stage.example .env.stage && chmod 600 .env.stage
 ```
 
 ```bash
-./deploy/deploy.sh --env .env.stage    # التجربة
+./deploy/deploy.sh --env .env.stage --expected-stack stage \
+  sha-0123456789abcdef0123456789abcdef01234567
 ```
 
 ```bash
-./deploy/deploy.sh                     # الإنتاج
+./deploy/deploy.sh --expected-stack prod \
+  sha-0123456789abcdef0123456789abcdef01234567
 ```
 
 ### أوامر يدوية على أي من البيئتين
@@ -296,12 +311,16 @@ cp .env.stage.example .env.stage && chmod 600 .env.stage
 ### فحص ما نُشر
 
 ```bash
-./deploy/verify-deployment.sh https://api-stage.4irq.com https://stage.4irq.com
+./deploy/verify-deployment.sh \
+  --api-url https://api-stage.4irq.com \
+  --admin-url https://stage.4irq.com \
+  --expected-revision 0123456789abcdef0123456789abcdef01234567
 ```
 
 يفحص من الخارج ما لا تفحصه حزمة الاختبارات: صلاحية الشهادة، وHSTS، ومنع
-التأطير، ورفض المسارات المحمية بلا توكن، وأن **حدّ المحاولات يرفض فعلاً** —
-وفشله هنا يعني غالباً أن `TRUST_PROXY` خاطئ فيرى الخادم عنوان الوكيل لكل الزوار.
+التأطير، وصحة التطبيق، ورفض المسارات المحمية بلا توكن. لا يستهلك عداد الدخول
+في فحص النشر. لاختبار الحد يدوياً أو مجدولاً أضف `--check-rate-limit`؛ هذا
+الخيار يرسل محاولات فاشلة متعمدة ويرفع عداد IP مؤقتاً.
 
 > حزمة `pnpm test` تُقلع Nest **داخل العملية** وتتحقق من قاعدة البيانات مباشرة،
 > فهي تختبر المنطق لا النشر ولا يمكن توجيهها إلى مضيف بعيد. السكربت أعلاه
@@ -327,12 +346,13 @@ EXPO_PUBLIC_API_URL=https://api-stage.4irq.com pnpm dev:driver
 ```
 
 ```bash
-./deploy/compose.sh exec -T db \
-  pg_dump -U superapp superapp | gzip > backup-$(date +%F).sql.gz
+./deploy/backup-db.sh --env .env.prod --label manual
 ```
 
-للتحديث: ادمج في `main` فينشر CI صوراً جديدة موقَّعة، ثم على الخادم
-`./deploy/deploy.sh`. لا بناء على الخادم إطلاقاً.
+للتحديث: ادمج في `main` فينشر CI digest جديدة ممسوحة وموقَّعة ثم ينشئ وسم SHA
+مرة واحدة، من دون `latest`. شغّل `deploy.sh` بوسم SHA الكامل، أو فعّل GitHub
+Environment بعد المراجعة ليجري ذلك آلياً من bundle نفس commit. لا بناء على
+الخادم إطلاقاً.
 
 للبناء محلياً (تطوير أو تجربة قبل الدفع):
 

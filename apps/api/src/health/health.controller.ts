@@ -11,6 +11,11 @@ export class HealthController {
   @Get()
   async check() {
     await this.db.execute(sql`SELECT 1`);
-    return { status: 'ok', db: 'up', at: new Date().toISOString() };
+    return {
+      status: 'ok',
+      db: 'up',
+      revision: process.env.APP_REVISION ?? 'unknown',
+      at: new Date().toISOString(),
+    };
   }
 }
