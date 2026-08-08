@@ -44,9 +44,25 @@ export class AdminSecurityController {
     return this.events.summary();
   }
 
+  /**
+   * الجلسات النشطة، ومعها علامة على جلسة الطالب نفسه.
+   *
+   * بدونها لا يميّز المشرف صفّه من صفوف غيره، فيقطع نفسه ظنّاً أنه يقطع
+   * جهازاً غريباً — ويجد نفسه خارج اللوحة في أثناء تحقيق أمني.
+   */
   @Get('sessions')
-  sessions(@Query(new ZodValidationPipe(zSessionsQuery)) query: SessionsQuery) {
-    return this.events.listActiveSessions(query);
+  async sessions(
+    @Query(new ZodValidationPipe(zSessionsQuery)) query: SessionsQuery,
+    @CurrentUser() user: RequestUser,
+  ) {
+    const page = await this.events.listActiveSessions(query, user.sessionFamilyId);
+    return {
+      ...page,
+      items: page.items.map((item) => ({
+        ...item,
+        isCurrent: item.familyId === user.sessionFamilyId,
+      })),
+    };
   }
 
   @HttpCode(200)

@@ -24,6 +24,29 @@ export function adminCredentialsFromEnv(): { email: string; password: string; se
  * الرمز لا يُقبل مرتين، وملفات الاختبار تتشارك حساب أدمن واحد — فمن يولّد
  * رمزاً بلا انتظار قد يصطدم بخطوة استهلكها غيره ويفشل عشوائياً.
  */
+/**
+ * جلسة أدمن بلا انتظار خطوة زمنية.
+ *
+ * `loginAdmin` ينتظر خطوة جديدة لأن الرمز لا يُقبل مرتين — وهو صحيح للحزمة
+ * كلها. لكن اختباراً يحتاج جلستين متتاليتين ينتظر ثلاثين ثانية بلا فائدة،
+ * فيُصفَّر عدّاد الاستهلاك بدلاً من ذلك: إعداد اختبار لا تغيير منتج، ومنعُ
+ * إعادة الاستعمال مُختبَر في `admin-totp.e2e`.
+ */
+export async function loginAdminNow(
+  http: Parameters<typeof request>[0],
+  resetStep: () => Promise<unknown>,
+): Promise<string> {
+  const { email, password, secret } = adminCredentialsFromEnv();
+  await resetStep();
+  const res = await request(http)
+    .post('/api/v1/auth/admin/login')
+    .send({ email, password, totp: totp.generate(secret) });
+  if (res.status !== 200 || res.body.status !== 'ok') {
+    throw new Error(`دخول الأدمن فشل (${res.status}): ${JSON.stringify(res.body)}`);
+  }
+  return res.body.tokens.accessToken as string;
+}
+
 export async function freshTotp(secret: string): Promise<string> {
   await waitForNewStep();
   return totp.generate(secret);

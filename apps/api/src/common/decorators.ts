@@ -26,6 +26,14 @@ export interface RequestUser {
   id: string;
   role: Role;
   phone: string;
+  /**
+   * عائلة جلسة الطلب الحالي.
+   *
+   * تُتيح للواجهة أن تقول «هذه جلستك» في قائمة الجلسات — وبدونها يقطع
+   * المشرف نفسه ظنّاً أنه يقطع جهازاً غريباً، ثم يجد نفسه خارج اللوحة في
+   * أثناء تحقيقٍ أمني.
+   */
+  sessionFamilyId?: string;
 }
 
 export const CurrentUser = createParamDecorator(

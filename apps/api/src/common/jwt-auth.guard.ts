@@ -77,7 +77,7 @@ export class JwtAuthGuard implements CanActivate {
       const role = await this.assertLiveSession(payload);
       // الدور من القاعدة لا من التوكن: خفض الصلاحيات كان يظل بلا أثر حتى
       // ينتهي الرمز، لأن RolesGuard يقرأ ما نضعه هنا.
-      req.user = { id: payload.sub, role, phone: payload.phone };
+      req.user = { id: payload.sub, role, phone: payload.phone, sessionFamilyId: payload.fid };
       return true;
     }
 

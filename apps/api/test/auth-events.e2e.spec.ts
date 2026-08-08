@@ -6,8 +6,8 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module';
 import { DB, DbClient } from '../src/db/drizzle.module';
-import { authEvents } from '../src/db/schema';
-import { loginAdmin } from './helpers/admin-login';
+import { adminCredentials, authEvents } from '../src/db/schema';
+import { loginAdmin, loginAdminNow } from './helpers/admin-login';
 
 /**
  * سجل عمليات الدخول والجلسات (A-07): كل محاولة تُقيَّد بنتيجتها ومصدرها،
@@ -210,6 +210,44 @@ describe('auth events and sessions', () => {
    * يمسح المخزن محلياً بلا استدعاء هذا المسار أصلاً، فبقيت العائلة حيّة
    * ثلاثين يوماً بعد «الخروج» — ولم يكن هنا ما يكشف ذلك.
    */
+  /**
+   * علامة «جلستك الحالية» في قائمة الجلسات.
+   *
+   * بدونها لا يميّز المشرف صفّه من صفوف غيره في لوحة تعرض جلسات الجميع،
+   * فيقطع نفسه ظنّاً أنه يقطع جهازاً غريباً — ويجد نفسه خارج اللوحة في
+   * أثناء تحقيق أمني. وخطأ في العلامة أسوأ من غيابها: يوجّه القطع إلى
+   * الصفّ الخطأ بثقة.
+   */
+  it('قائمة الجلسات تعلّم جلسة الطالب وحدها', async () => {
+    // جلستان، والثانية أحدث: الترتيب بالأحدث وحده كان يدفع جلسة الطالب إلى
+    // أسفل القائمة حتى تخرج من الصفحة، فتختفي علامتها بلا إشعار. وحدّ الصفحة
+    // واحد هنا كي تُختبَر الضمانة نفسها: جلستك أولاً مهما كثر ما بعدها.
+    //
+    // وكلتاهما بلا انتظار خطوة TOTP: `loginAdmin` ينتظر خطوة جديدة قد تبلغ
+    // ثلاثين ثانية، ومهلة الاختبار ثلاثون — فكان ينفدها قبل أن يبلغ دعواه
+    // ويسقط بانتهاء المهلة لا بخطأ حقيقي.
+    const resetStep = () => db.update(adminCredentials).set({ lastTotpStep: null });
+    const older = await loginAdminNow(http, resetStep);
+    const newer = await loginAdminNow(http, resetStep);
+
+    const res = await request(http)
+      .get('/api/v1/admin/sessions')
+      .query({ limit: 1 })
+      .set('Authorization', `Bearer ${older}`)
+      .expect(200);
+    expect(res.body.items).toHaveLength(1);
+    expect(res.body.items[0].isCurrent).toBe(true);
+
+    // ومن الجلسة الأخرى: تُعلَّم تلك لا الأولى
+    const res2 = await request(http)
+      .get('/api/v1/admin/sessions')
+      .query({ limit: 1 })
+      .set('Authorization', `Bearer ${newer}`)
+      .expect(200);
+    expect(res2.body.items[0].isCurrent).toBe(true);
+    expect(res2.body.items[0].familyId).not.toBe(res.body.items[0].familyId);
+  });
+
   it('logout actually kills the refresh family', async () => {
     const login = await request(http)
       .post('/api/v1/auth/login')
