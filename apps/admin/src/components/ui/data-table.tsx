@@ -19,6 +19,8 @@ export interface DataTableProps<T> {
   onRowClick?: (row: T) => void;
   empty?: string;
   loading?: boolean;
+  /** صنف لكل صفّ على حدة — لتمييز الصفوف التي تعني شيئاً (إخفاق، تأخّر) */
+  rowClassName?: (row: T) => string | undefined;
 }
 
 function defaultCell<T>(row: T, key: string): ReactNode {
@@ -41,6 +43,7 @@ export function DataTable<T>({
   onRowClick,
   empty,
   loading = false,
+  rowClassName,
 }: DataTableProps<T>) {
   return (
     <div className="overflow-x-auto rounded-card border border-zinc-200 bg-white shadow-sm">
@@ -79,6 +82,7 @@ export function DataTable<T>({
                   className={cn(
                     'border-b border-zinc-100 last:border-0',
                     onRowClick && 'cursor-pointer transition hover:bg-brand-50/50',
+                    rowClassName?.(row),
                   )}
                 >
                   {columns.map((col) => (
