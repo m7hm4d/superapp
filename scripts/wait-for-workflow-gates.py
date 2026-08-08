@@ -27,6 +27,9 @@ class Gate:
     jobs: tuple[str, ...]
 
 
+# These are GitHub-computed job display names. Renaming a job or changing a
+# matrix value in the workflows below without updating this tuple (in the same
+# PR) makes every later Publish fail its gate for every commit.
 GATES = (
     Gate(
         "CI",
@@ -47,10 +50,19 @@ GATES = (
 
 SHA = re.compile(r"[0-9a-fA-F]{40}\Z")
 REPOSITORY = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z")
+TRANSIENT_HTTP = {429, 500, 502, 503, 504}
 
 
 class GateError(RuntimeError):
     """A gate cannot safely be accepted."""
+
+
+class TransientAPIError(RuntimeError):
+    """A GitHub API read failed in a way a later poll may resolve.
+
+    The poll loop runs for up to 45 minutes and performs hundreds of reads; a
+    single 502 or DNS blip must consume the deadline, not fail the gates job.
+    """
 
 
 def required_env(name: str) -> str:
@@ -85,26 +97,47 @@ class GitHub:
         url = f"{self.api_url}{path}"
         if query:
             url = f"{url}?{urllib.parse.urlencode(query)}"
-        request = urllib.request.Request(
-            url,
-            headers={
-                "Accept": "application/vnd.github+json",
-                "Authorization": f"Bearer {self.token}",
-                "User-Agent": "superapp-publish-gate",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
+        last_error = "unknown error"
+        for attempt in range(3):
+            request = urllib.request.Request(
+                url,
+                headers={
+                    "Accept": "application/vnd.github+json",
+                    "Authorization": f"Bearer {self.token}",
+                    "User-Agent": "superapp-publish-gate",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    return json.load(response)
+            except urllib.error.HTTPError as error:
+                # A newly added workflow can briefly be absent from the
+                # workflow index while the same push is already running
+                # Publish.
+                if error.code == 404:
+                    return {}
+                rate_limited = error.code == 403 and (
+                    error.headers.get("Retry-After") is not None
+                    or error.headers.get("X-RateLimit-Remaining") == "0"
+                )
+                if error.code not in TRANSIENT_HTTP and not rate_limited:
+                    raise GateError(
+                        f"GitHub API returned HTTP {error.code}"
+                    ) from error
+                last_error = f"HTTP {error.code}"
+            except urllib.error.URLError as error:
+                last_error = str(getattr(error, "reason", error))
+            if attempt < 2:
+                time.sleep(2 * (attempt + 1))
+        raise TransientAPIError(f"GitHub API stayed unavailable: {last_error}")
+
+    def workflow_file_exists_at(self, workflow: str, sha: str) -> bool:
+        workflow_path = urllib.parse.quote(f".github/workflows/{workflow}", safe="/")
+        payload = self.get(
+            f"/repos/{self.repository}/contents/{workflow_path}", {"ref": sha}
         )
-        try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                return json.load(response)
-        except urllib.error.HTTPError as error:
-            # A newly added workflow can briefly be absent from the workflow
-            # index while the same push is already running Publish.
-            if error.code == 404:
-                return {}
-            raise GateError(f"GitHub API returned HTTP {error.code}") from error
-        except urllib.error.URLError as error:
-            raise GateError(f"GitHub API request failed: {error.reason}") from error
+        return bool(payload)
 
     def workflow_run(self, workflow: str, sha: str) -> dict | None:
         workflow_id = urllib.parse.quote(workflow, safe="")
@@ -136,15 +169,37 @@ class GitHub:
         return {job.get("name", ""): job for job in payload.get("jobs", [])}
 
 
-def verify_gate(github: GitHub, gate: Gate, sha: str) -> tuple[bool, str]:
+def verify_gate(
+    github: GitHub, gate: Gate, sha: str, absence_checked: set[str]
+) -> tuple[bool, str]:
     run = github.workflow_run(gate.workflow, sha)
     if run is None:
+        # A run that never existed and never will: the commit predates the
+        # workflow file. Waiting out the 45-minute deadline hides the real,
+        # permanent cause behind a generic timeout.
+        if gate.workflow not in absence_checked:
+            if not github.workflow_file_exists_at(gate.workflow, sha):
+                raise GateError(
+                    f"{gate.label}: .github/workflows/{gate.workflow} does not "
+                    f"exist at {sha}. Commits that predate a gate workflow can "
+                    "never pass it; promote a commit that contains the current "
+                    "pipeline instead."
+                )
+            absence_checked.add(gate.workflow)
         return False, "run has not appeared"
 
     status = run.get("status")
     conclusion = run.get("conclusion")
     if status != "completed":
         return False, f"run is {status or 'pending'}"
+    if conclusion == "cancelled":
+        # Not terminal: a re-run (a new attempt of the same run) can still
+        # satisfy the gate before the deadline. Terminal failure here would
+        # permanently strand the commit without a promotable image.
+        return False, (
+            f"run {run['id']} was cancelled; re-run it before the gate "
+            "deadline to unblock this commit"
+        )
     if conclusion != "success":
         raise GateError(f"{gate.label} concluded {conclusion or 'without a conclusion'}")
 
@@ -152,7 +207,13 @@ def verify_gate(github: GitHub, gate: Gate, sha: str) -> tuple[bool, str]:
     for required in gate.jobs:
         job = jobs.get(required)
         if job is None:
-            raise GateError(f"{gate.label} is missing required job {required!r}")
+            observed = ", ".join(sorted(name for name in jobs if name)) or "none"
+            raise GateError(
+                f"{gate.label} is missing required job {required!r}; completed "
+                f"run {run['id']} has: {observed}. If the job was renamed in "
+                f"{gate.workflow}, update GATES in "
+                "scripts/wait-for-workflow-gates.py in the same PR."
+            )
         if job.get("status") != "completed" or job.get("conclusion") != "success":
             raise GateError(
                 f"{gate.label} job {required!r} is "
@@ -176,11 +237,15 @@ def main() -> int:
         poll = positive_int("GATE_POLL_SECONDS", 15)
         deadline = time.monotonic() + timeout
         pending = {gate.label: gate for gate in GATES}
+        absence_checked: set[str] = set()
 
         print(f"Waiting for exact-commit gates on {sha}", flush=True)
         while pending:
             for label, gate in tuple(pending.items()):
-                ready, detail = verify_gate(github, gate, sha)
+                try:
+                    ready, detail = verify_gate(github, gate, sha, absence_checked)
+                except TransientAPIError as error:
+                    ready, detail = False, f"still waiting ({error})"
                 print(f"{label}: {detail}", flush=True)
                 if ready:
                     del pending[label]

@@ -117,6 +117,7 @@ container_output="$(
   docker ps \
     --filter "label=com.docker.compose.project=${PROJECT_NAME}" \
     --filter 'label=com.docker.compose.service=db' \
+    --filter 'label=com.docker.compose.oneoff=False' \
     --format '{{.ID}}'
 )" || die "تعذّر تحديد حاوية قاعدة البيانات"
 
@@ -152,10 +153,6 @@ chmod 700 "$DEPLOY_STATE_DIR" "$BACKUPS_ROOT" "$BACKUP_DIR"
 MAX_LOCAL_BACKUPS="${MAX_LOCAL_BACKUPS:-30}"
 [[ "$MAX_LOCAL_BACKUPS" =~ ^[1-9][0-9]{0,3}$ ]] || \
   die "MAX_LOCAL_BACKUPS يجب أن يكون عدداً من 1 إلى 9999"
-existing_backups="$(find "$BACKUP_DIR" -maxdepth 1 -type f -name '*.dump' | wc -l | tr -d '[:space:]')"
-[[ "$existing_backups" =~ ^[0-9]+$ ]] || die "تعذّر عد النسخ المحلية"
-[ "$existing_backups" -lt "$MAX_LOCAL_BACKUPS" ] || \
-  die "بلغت النسخ المحلية الحد $MAX_LOCAL_BACKUPS؛ انقل نسخة خارج الخادم وتحقق من restore قبل حذف القديم"
 
 database_bytes="$(
   docker exec "$DB_CONTAINER" sh -eu -c \
@@ -207,5 +204,17 @@ chmod 600 "$checksum_temporary"
 mv -- "$checksum_temporary" "$checksum_path"
 
 trap - EXIT
+
+# التدوير بعد نجاح نسخة جديدة متحقق منها فقط، فلا تُحذف نسخة قديمة إلا وقد
+# وُجد بديل أحدث سليم — ولا يتوقف النشر الآلي عند بلوغ الحد كما كان يحدث
+# عند النسخة 31. الأرشفة خارج الخادم واختبار restore يبقيان مسؤولية تشغيلية
+# مستقلة لا يعوضهما الاحتفاظ المحلي.
+pruned_backups="$(find "$BACKUP_DIR" -maxdepth 1 -type f -name '*.dump' | LC_ALL=C sort | head -n -"$MAX_LOCAL_BACKUPS")"
+while IFS= read -r old_backup; do
+  [ -n "$old_backup" ] || continue
+  printf '    حذف نسخة قديمة فوق الحد %s: %s\n' "$MAX_LOCAL_BACKUPS" "$old_backup" >&2
+  rm -f -- "$old_backup" "${old_backup}.sha256"
+done <<< "$pruned_backups"
+
 printf '    حُفظت النسخة: %s\n' "$final_path" >&2
 printf '%s\n' "$final_path"

@@ -420,6 +420,9 @@ jobs:
     permissions:
       contents: write
       packages: read
+      # Read-only: lets the promotion fail fast with the real cause when no
+      # push-triggered Publish run (and therefore no guarded image) exists.
+      actions: read
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -543,6 +546,39 @@ jobs:
             }
           }
 
+          # Fail fast, with the real cause, when the guarded images can never
+          # appear: promotion verifies images that only a push-triggered
+          # Publish run on main builds. Commits that predate this pipeline
+          # have no such run; a failed run left no images behind. Without this
+          # check both cases surface as a 30-minute wait then a generic
+          # "image did not appear".
+          github_get \
+            "${GITHUB_API_ENDPOINT%/}/repos/${REPOSITORY}/actions/workflows/publish.yml/runs?event=push&branch=main&head_sha=${source_sha}&per_page=1" \
+            "$api_response"
+          [[ "$HTTP_STATUS" == '200' ]] || {
+            echo "Publish run lookup returned HTTP ${HTTP_STATUS}" >&2
+            exit 1
+          }
+          push_run_state=$(
+            jq -er 'if (.workflow_runs | length) == 0 then "absent"
+              else "\(.workflow_runs[0].status)/\(.workflow_runs[0].conclusion // "-")" end' \
+              "$api_response"
+          )
+          case "$push_run_state" in
+            absent)
+              echo "no push-triggered Publish run exists for ${source_sha}: commits that predate the publish pipeline have no guarded images and cannot be promoted; release a newer main commit instead" >&2
+              exit 1
+              ;;
+            completed/success) ;;
+            completed/*)
+              echo "the push-triggered Publish run for ${source_sha} concluded '${push_run_state#completed/}'; re-run it to create the guarded images, then dispatch this promotion again" >&2
+              exit 1
+              ;;
+            *)
+              echo "push-triggered Publish run for ${source_sha} is ${push_run_state}; waiting for its guarded images"
+              ;;
+          esac
+
           deadline=$((SECONDS + 1800))
           api_digest=''
           admin_digest=''
@@ -550,7 +586,14 @@ jobs:
             image="ghcr.io/${owner}/${image_name}"
             digest=''
             while (( SECONDS < deadline )); do
-              python3 scripts/check-registry-tag.py probe "$image" "$source_tag" > "$state_json"
+              # A registry outage that outlasts the probe's short internal
+              # retries must consume this deadline, not abort the release via
+              # errexit: this loop exists precisely to ride out that window.
+              if ! python3 scripts/check-registry-tag.py probe "$image" "$source_tag" > "$state_json"; then
+                echo "registry probe failed transiently for ${image_name}:${source_tag}; retrying"
+                sleep 10
+                continue
+              fi
               state=$(jq -er '.state' "$state_json")
               if [[ "$state" == 'present' ]]; then
                 digest=$(jq -er '.digest' "$state_json")

@@ -423,7 +423,10 @@ jobs:
             (cd "$release_dir" && sha256sum -c BUNDLE.sha256) >&2
           else
             temporary_release=$(mktemp -d "$release_root/.${source_sha}.XXXXXXXX")
-            trap 'rm -rf -- "$temporary_release"' EXIT
+            # The tree below is made read-only before publication, and rm alone
+            # cannot descend a mode-500 directory: restore owner write first or
+            # every interrupted install strands an undeletable dot-directory.
+            trap 'chmod -R u+w -- "$temporary_release" 2>/dev/null; rm -rf -- "$temporary_release"' EXIT
             tar --no-same-owner -xzf "$archive" -C "$temporary_release"
             (cd "$temporary_release" && sha256sum -c BUNDLE.sha256) >&2
             chmod 500 "$temporary_release" "$temporary_release/deploy"
@@ -433,7 +436,9 @@ jobs:
               "$temporary_release/deploy/deploy.sh" \
               "$temporary_release/deploy/backup-db.sh" \
               "$temporary_release/deploy/verify-deployment.sh"
-            mv "$temporary_release" "$release_dir"
+            # -T so losing a same-SHA install race fails loudly instead of
+            # silently nesting this tree inside the winner's release directory.
+            mv -T -- "$temporary_release" "$release_dir"
             trap - EXIT
           fi
 
@@ -535,6 +540,40 @@ jobs:
           printf 'queued\t-\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$status_tmp"
           chmod 600 "$status_tmp"
           mv -f -- "$status_tmp" "$run_dir/status"
+
+          # Bounded retention — nothing else prunes these paths, and they share
+          # a filesystem with the database backups, so unbounded growth ends as
+          # a free-space failure in backup-db.sh with the cause far from here.
+          # A runs/ entry older than 30 days is dead (polling stops after 75
+          # minutes); a dot-directory in .releases/ is an interrupted install.
+          # Freshness rejection pins deploys to the current main HEAD, so any
+          # release bundle other than $release_dir that is 30 days untouched
+          # cannot belong to a live deployment.
+          {
+            while IFS= read -r old_run; do
+              [ -n "$old_run" ] || continue
+              [ "$old_run" != "$run_dir" ] || continue
+              chmod -R u+w -- "$old_run" 2>/dev/null || true
+              rm -rf -- "$old_run" 2>/dev/null &&
+                echo "pruned deployment run: $old_run" >&2 ||
+                echo "could not prune deployment run: $old_run" >&2
+            done < <(find "$runs_root" -mindepth 1 -maxdepth 1 -type d -mtime +30)
+            while IFS= read -r stranded_tree; do
+              [ -n "$stranded_tree" ] || continue
+              chmod -R u+w -- "$stranded_tree" 2>/dev/null || true
+              rm -rf -- "$stranded_tree" 2>/dev/null &&
+                echo "pruned interrupted install: $stranded_tree" >&2 ||
+                echo "could not prune interrupted install: $stranded_tree" >&2
+            done < <(find "$release_root" -mindepth 1 -maxdepth 1 -type d -name '.*' -mtime +1)
+            while IFS= read -r old_release; do
+              [ -n "$old_release" ] || continue
+              [ "$old_release" != "$release_dir" ] || continue
+              chmod -R u+w -- "$old_release" 2>/dev/null || true
+              rm -rf -- "$old_release" 2>/dev/null &&
+                echo "pruned release bundle: $old_release" >&2 ||
+                echo "could not prune release bundle: $old_release" >&2
+            done < <(find "$release_root" -mindepth 1 -maxdepth 1 -type d ! -name '.*' -mtime +30)
+          } || echo "retention pruning was incomplete; disk usage may grow" >&2
 
           printf '%s\n' "$run_dir"
           REMOTE_SCRIPT
@@ -814,36 +853,39 @@ jobs:
           }
           run_b64=$(printf '%s' "$REMOTE_RUN" | base64 | tr -d '\n')
           ssh_dir="$RUNNER_TEMP/superapp-production-ssh"
+          poll_stderr="$RUNNER_TEMP/superapp-poll-stderr"
           transient_errors=0
           poll=0
           stale_heartbeat_polls=0
           deadline=$((SECONDS + 4500))
 
-          # Use a wall-clock deadline, so repeated SSH connection timeouts do
-          # not silently stretch the poll past the 90-minute job timeout.
-          while (( SECONDS < deadline )); do
-            poll=$((poll + 1))
-            if status_line=$(
-              ssh \
-                -p "$SSH_PORT" \
-                -i "$ssh_dir/id_ed25519" \
-                -o BatchMode=yes \
-                -o ConnectTimeout=10 \
-                -o IdentitiesOnly=yes \
-                -o StrictHostKeyChecking=yes \
-                -o UserKnownHostsFile="$ssh_dir/known_hosts" \
-                -- "${SSH_USER}@${SSH_HOST}" \
-                "bash -s -- ${run_b64}" 2>/dev/null <<'POLL_SCRIPT'
+          # The poll script separates durable state that is gone or unreadable
+          # (permanent: exit 64/65) from SSH transport failures (exit 255,
+          # transient), and its stderr is preserved for diagnosis instead of
+          # being discarded.
+          poll_remote_status() {
+            ssh \
+              -p "$SSH_PORT" \
+              -i "$ssh_dir/id_ed25519" \
+              -o BatchMode=yes \
+              -o ConnectTimeout=10 \
+              -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+              -- "${SSH_USER}@${SSH_HOST}" \
+              "bash -s -- ${run_b64}" 2>"$poll_stderr" <<'POLL_SCRIPT'
           set -euo pipefail
           run_dir=$(printf '%s' "$1" | base64 --decode)
           [[ "$run_dir" = /* && "$run_dir" != *$'\n'* && "$run_dir" != *$'\r'* ]] || exit 1
-          [[ -d "$run_dir" && ! -L "$run_dir" ]] || exit 1
+          # exit 64: the durable state itself is gone — permanent, not an SSH
+          # blip. exit 65: the status file exists but cannot be trusted.
+          [[ -d "$run_dir" && ! -L "$run_dir" ]] || exit 64
           status_file="$run_dir/status"
           pid_file="$run_dir/pid"
           runner="$run_dir/runner.sh"
           heartbeat_file="$run_dir/heartbeat"
           launch_marker="$run_dir/launch-attempt"
-          [[ -f "$status_file" && ! -L "$status_file" ]] || exit 1
+          [[ -f "$status_file" && ! -L "$status_file" ]] || exit 64
 
           load_status() {
             local status_line
@@ -898,11 +940,11 @@ jobs:
             (( attempted <= now + 5 && now - attempted <= 30 ))
           }
 
-          load_status
+          load_status || exit 65
           if [[ "$state" == 'queued' || "$state" == 'running' ]] && ! process_matches_run; then
             # The wrapper can write a final status just before it exits. Reload
             # after proving its PID is dead/reused so that final success wins.
-            load_status
+            load_status || exit 65
             if [[ "$state" == 'queued' || "$state" == 'running' ]] && launch_grace_is_active; then
               # The launcher may have written its durable-attempt marker and
               # forked just before SSH dropped. Give runner.sh a bounded window
@@ -913,7 +955,7 @@ jobs:
               printf 'failure\t125\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$failed_tmp" &&
                 chmod 600 "$failed_tmp" &&
                 mv -f -- "$failed_tmp" "$status_file" || exit 125
-              load_status
+              load_status || exit 65
             fi
           fi
           if [[ "$state" == 'running' ]] && process_matches_run && ! heartbeat_is_fresh; then
@@ -926,16 +968,49 @@ jobs:
           fi
           printf '%s\t%s\t%s\n' "$state" "$exit_code" "$timestamp"
           POLL_SCRIPT
-            ); then
-              transient_errors=0
-            else
+          }
+
+          describe_permanent_poll_failure() {
+            local poll_status="$1"
+            sed 's/^/  remote: /' "$poll_stderr" >&2 || true
+            case "$poll_status" in
+              64)
+                echo "the durable run directory or its status file is gone on the VPS; the deployment outcome is unknown — inspect ${REMOTE_RUN} on the host" >&2
+                ;;
+              65)
+                echo "the durable status file on the VPS is malformed; the deployment outcome is unknown — inspect ${REMOTE_RUN} on the host" >&2
+                ;;
+              *)
+                echo "the remote status poller failed permanently with exit ${poll_status}" >&2
+                ;;
+            esac
+          }
+
+          # Use a wall-clock deadline, so repeated SSH connection timeouts do
+          # not silently stretch the poll past the 90-minute job timeout.
+          while (( SECONDS < deadline )); do
+            poll=$((poll + 1))
+            poll_status=0
+            status_line=$(poll_remote_status) || poll_status=$?
+            if (( poll_status == 255 )); then
+              # SSH transport failure: the durable remote deployment continues
+              # unaffected, so only the connection is retried.
               transient_errors=$((transient_errors + 1))
               if (( transient_errors == 1 || transient_errors % 6 == 0 )); then
                 echo "transient SSH poll failure (${transient_errors} consecutive); remote deployment continues" >&2
+                sed 's/^/  ssh: /' "$poll_stderr" >&2 || true
               fi
               sleep 10
               continue
             fi
+            if (( poll_status != 0 )); then
+              # POLL_SCRIPT itself failed: retrying cannot repair missing or
+              # malformed durable state, so report the real cause immediately
+              # instead of logging "transient" for 75 minutes.
+              describe_permanent_poll_failure "$poll_status"
+              exit 1
+            fi
+            transient_errors=0
 
             IFS=$'\t' read -r state exit_code timestamp extra <<< "$status_line"
             [[ -z "${extra:-}" ]] || { echo "invalid remote status" >&2; exit 1; }
@@ -971,6 +1046,22 @@ jobs:
             sleep 10
           done
 
+          # One final authoritative read: a deployment that reached a terminal
+          # state exactly as the deadline expired must be reported as its real
+          # outcome, not as a generic poll timeout.
+          poll_status=0
+          status_line=$(poll_remote_status) || poll_status=$?
+          if (( poll_status == 0 )); then
+            IFS=$'\t' read -r state exit_code timestamp extra <<< "$status_line"
+            if [[ -z "${extra:-}" && "$state" == 'success' && "$exit_code" == '0' ]]; then
+              echo "remote deployment succeeded (${timestamp}); log: ${REMOTE_RUN}/deploy.log"
+              exit 0
+            fi
+            if [[ -z "${extra:-}" && "$state" == 'failure' && "$exit_code" =~ ^[0-9]+$ ]]; then
+              echo "remote deployment failed with exit ${exit_code}; log preserved at ${REMOTE_RUN}/deploy.log" >&2
+              exit 1
+            fi
+          fi
           echo "poll timeout; the durable remote deployment continues at ${REMOTE_RUN}" >&2
           exit 1
 

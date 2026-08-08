@@ -26,6 +26,30 @@ if [ "${1:-}" = "--env" ]; then
   shift 2
 fi
 
+# ‏--env الخاص بالغلاف يُقبل أول وسيطة فقط. لو جاء بعد الأمر بقيمة تشبه ملف
+# بيئة فذلك خطأ استعمال يقع صامتاً على .env.prod: يبتلعه خيار --env في
+# docker compose كمتغير حاوية ويعمل الأمر على بيئة الإنتاج — عكس غاية الغلاف.
+# ‏KEY=VAL وأسماء المتغيرات العادية تمرّ إلى docker compose كما هي.
+previous_argument=""
+for wrapper_argument in "$@"; do
+  env_candidate=""
+  if [ "$previous_argument" = "--env" ]; then
+    env_candidate="$wrapper_argument"
+  fi
+  case "$wrapper_argument" in
+    --env=*) env_candidate="${wrapper_argument#--env=}" ;;
+  esac
+  if [ -n "$env_candidate" ]; then
+    case "$env_candidate" in
+      *=*) ;;
+      .* | /* | *.env | *.env.* | env.*)
+        die "خيار الغلاف --env يجب أن يكون أول وسيطة: compose.sh --env ${env_candidate} <الأمر> ..."
+        ;;
+    esac
+  fi
+  previous_argument="$wrapper_argument"
+done
+
 cd "$(dirname "$0")/.."
 for required_command in docker id stat; do
   command -v "$required_command" >/dev/null 2>&1 || die "$required_command غير مثبَّت"
@@ -97,10 +121,13 @@ configured_service_digest() {
   local container_output container_id configured image_id candidate selected=""
   local ids=()
 
+  # ‏oneoff=False يستبعد حاويات `compose run` العابرة كي لا تكسر واحدة يتيمة
+  # شرط «حاوية واحدة بالضبط» فتعطل أوامر الغلاف كلها.
   container_output="$(
     docker ps -a \
       --filter "label=com.docker.compose.project=${PROJECT_NAME}" \
       --filter "label=com.docker.compose.service=${service}" \
+      --filter 'label=com.docker.compose.oneoff=False' \
       --format '{{.ID}}'
   )" || die "تعذّر تحديد حاوية ${service}"
   while IFS= read -r container_id; do

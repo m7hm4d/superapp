@@ -8,10 +8,17 @@ on:
 permissions:
   contents: read
 
+# PR pushes cancel their superseded runs. Runs on main must queue instead:
+# publish gates verify main runs by exact SHA, and a cancelled main run
+# permanently leaves that commit without a passing gate (and therefore
+# without a promotable sha-image) until a human re-runs it.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+# أسماء jobs هنا (وقيم matrix في expo) بوابات يعتمدها publish حرفياً عبر
+# scripts/wait-for-workflow-gates.py — تغيير اسم دون تحديث GATES هناك يمنع
+# كل publish لاحق.
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -358,13 +365,22 @@ jobs:
             --format '{{.Service}} {{.State}} {{.ExitCode}}' | awk '$1=="migrate"{print $2" "$3}')
           test "$state" = "exited 0" || { echo "migrate: $state"; exit 1; }
 
-          echo "--- wait for api and admin to report healthy ---"
+          echo "--- wait for db, api, and admin to report healthy ---"
+          # مطابقة تامة لا substring: ‏grep -c 'healthy' كان يعدّ 'unhealthy'
+          # أيضاً، فتمرّ خدمة معطوبة HEALTHCHECK ولا تُكتشف إلا في بوابة
+          # الإنتاج الصارمة التي تعيد النشر.
+          healthy=0
           for _ in $(seq 1 60); do
             healthy=$(docker compose -f docker-compose.prod.yml --env-file .env.prod ps \
-              --format '{{.Service}} {{.Health}}' | grep -c 'healthy' || true)
+              --format '{{.Health}}' | awk '$0 == "healthy"' | wc -l)
             [ "$healthy" -ge 3 ] && break
             sleep 5
           done
+          if [ "$healthy" -lt 3 ]; then
+            echo "services did not all become healthy within 300s:"
+            docker compose -f docker-compose.prod.yml --env-file .env.prod ps
+            exit 1
+          fi
 
           echo "--- api answers, and reports the database up ---"
           docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T api \

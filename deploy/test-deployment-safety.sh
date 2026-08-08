@@ -159,6 +159,29 @@ for compose_caller in deploy/deploy.sh deploy/compose.sh; do
     "$compose_caller" || \
     fail "$compose_caller يسمح لمتغير استيفاء حساس موروث بتجاوز env file"
 done
+# ‏--env بعد الأمر كان يقع صامتاً على .env.prod ويحوّل القيمة إلى متغير حاوية.
+misplaced_env_status=0
+misplaced_env_output="$(./deploy/compose.sh exec --env .env.stage -T db psql 2>&1)" || \
+  misplaced_env_status=$?
+[ "$misplaced_env_status" -ne 0 ] || fail "compose يقبل --env بعد الأمر"
+printf '%s' "$misplaced_env_output" | grep -q 'أول وسيطة' || \
+  fail "رفض --env في غير المقدمة لا يشرح الموضع الصحيح"
+
+# حاوية run يتيمة يجب ألا تحسب في اكتشاف الخدمات في المسارات الثلاثة.
+for oneoff_guard in deploy/deploy.sh deploy/backup-db.sh deploy/compose.sh; do
+  grep -Fq 'label=com.docker.compose.oneoff=False' "$oneoff_guard" || \
+    fail "$oneoff_guard يلتقط حاويات run العابرة في اكتشاف الخدمات"
+done
+
+# التدوير لا يسبق نجاح النسخة الجديدة: الحذف قبل الإثبات يفقد نسخة بلا بديل.
+rotation_line="$(grep -n 'حذف نسخة قديمة فوق الحد' deploy/backup-db.sh | head -1 | cut -d: -f1)"
+# shellcheck disable=SC2016
+finalize_line="$(grep -n 'mv -- "$temporary" "$final_path"' deploy/backup-db.sh | cut -d: -f1)"
+if [ -z "$rotation_line" ] || [ -z "$finalize_line" ]; then
+  fail "تعذّر إثبات ترتيب تدوير النسخ بعد اكتمال النسخة الجديدة"
+fi
+[ "$finalize_line" -lt "$rotation_line" ] || fail "تدوير النسخ يسبق اكتمال النسخة الجديدة"
+
 # shellcheck disable=SC2016
 grep -Fq 'APP_REVISION: ${APP_REVISION:?APP_REVISION مطلوب}' docker-compose.prod.yml || \
   fail "Compose لا يمرر revision الموثقة إلى الخدمات"

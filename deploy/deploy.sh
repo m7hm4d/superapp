@@ -266,6 +266,39 @@ HEALTH_TIMEOUT_SECONDS="${DEPLOY_HEALTH_TIMEOUT_SECONDS:-180}"
 [[ "$HEALTH_TIMEOUT_SECONDS" =~ ^[1-9][0-9]{0,3}$ ]] || \
   die "DEPLOY_HEALTH_TIMEOUT_SECONDS يجب أن يكون عدداً من 1 إلى 9999"
 
+read_env_value() {
+  local key="$1"
+  local file="$2"
+  local line value="" count=0
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    case "$line" in
+      "${key}="*)
+        value="${line#"${key}"=}"
+        count=$((count + 1))
+        ;;
+    esac
+  done < "$file"
+
+  [ "$count" -eq 1 ] || die "يجب أن يحتوي ملف البيئة على ${key} واحد فقط"
+  printf '%s' "$value"
+}
+
+# مطابقة مبكرة بين --api-url وNEXT_PUBLIC_API_URL في ملف البيئة: الثانية هي
+# ما تحقنه اللوحة في HTML وما يطابقه verify-deployment.sh حرفياً بعد التبديل.
+# انحراف بينهما كان يظهر بعد النسخ والهجرة والتبديل، فيفشل كل نشر ويعيد
+# الصور فقط بينما الهجرات تتراكم. الآن يفشل قبل أي أثر جانبي وبرسالة تبين
+# القيمتين.
+if [ -n "$API_URL" ]; then
+  ENV_PUBLIC_API_URL="$(read_env_value NEXT_PUBLIC_API_URL "$ENV_FILE")"
+  if [ "$ENV_PUBLIC_API_URL" != "$API_URL" ]; then
+    printf -- '--api-url:           %s\n' "$API_URL" >&2
+    printf 'NEXT_PUBLIC_API_URL: %s\n' "$ENV_PUBLIC_API_URL" >&2
+    die "قيمة NEXT_PUBLIC_API_URL في ملف البيئة لا تطابق --api-url حرفياً؛ وحّد القيمتين قبل النشر"
+  fi
+fi
+
 # بيئة shell تتغلب على قيم --env-file وtop-level name في Compose. نمسح كل
 # COMPOSE_* الموروثة ومتغيرات الاستيفاء الحساسة، ثم نعيد فقط القيم التي
 # استخرجها السكربت أو تحقق منها. وإلا يستطيع shell سابق تغيير project/volume
@@ -367,10 +400,13 @@ find_running_service_container() {
   local container_output container_id
   local ids=()
 
+  # ‏oneoff=False يستبعد حاويات `compose run` العابرة: واحدة يتيمة من أمر seed
+  # منسي كانت تجعل العد 2 فتعطل النشر والنسخ وأوامر الغلاف كلها.
   container_output="$(
     docker ps \
       --filter "label=com.docker.compose.project=${PROJECT_NAME}" \
       --filter "label=com.docker.compose.service=${service}" \
+      --filter 'label=com.docker.compose.oneoff=False' \
       --format '{{.ID}}'
   )" || die "تعذّر تحديد حاوية ${service} للحزمة ${STACK_NAME}"
 
@@ -394,6 +430,7 @@ find_service_container_any_state() {
     docker ps -a \
       --filter "label=com.docker.compose.project=${PROJECT_NAME}" \
       --filter "label=com.docker.compose.service=${service}" \
+      --filter 'label=com.docker.compose.oneoff=False' \
       --format '{{.ID}}'
   )" || die "تعذّر تحديد حاوية ${service} للحزمة ${STACK_NAME}"
 
@@ -429,32 +466,111 @@ running_service_digest() {
   resolve_local_repository_digest "$image_id" "$repository"
 }
 
-PREVIOUS_API_DIGEST="$(running_service_digest api "$API_REPOSITORY")"
-PREVIOUS_ADMIN_DIGEST="$(running_service_digest admin "$ADMIN_REPOSITORY")"
+history_file="${DEPLOY_STATE_DIR}/${STACK_NAME}-history.tsv"
+
+# آخر سطر في سجل النشرات الناجحة هو هدف العودة، لا ما يصادف أنه يعمل الآن:
+# نشر فاشل يترك حاويات الإصدار المكسور عاملة، والتقاطها كان يجعل «العودة»
+# في النشر التالي تعيد الإصدار الذي سبب الحادثة بدل آخر إصدار متحقق منه.
+read_last_verified_release() {
+  local line h_stack h_tag h_api h_admin
+
+  HISTORY_TAG=""
+  HISTORY_API_DIGEST=""
+  HISTORY_ADMIN_DIGEST=""
+  [ -f "$history_file" ] && [ ! -L "$history_file" ] || return 1
+  line="$(tail -n 1 -- "$history_file")" || return 1
+  [ -n "$line" ] || return 1
+  IFS=$'\t' read -r _ h_stack h_tag h_api h_admin _ <<< "$line"
+  [ "$h_stack" = "$STACK_NAME" ] || return 1
+  [[ "$h_tag" =~ ^sha-[0-9a-f]{40}$ ]] || return 1
+  is_repository_digest "$h_api" "$API_REPOSITORY" || return 1
+  is_repository_digest "$h_admin" "$ADMIN_REPOSITORY" || return 1
+  HISTORY_TAG="$h_tag"
+  HISTORY_API_DIGEST="$h_api"
+  HISTORY_ADMIN_DIGEST="$h_admin"
+}
+
+PREVIOUS_API_DIGEST=""
+PREVIOUS_ADMIN_DIGEST=""
 PREVIOUS_SOURCE_SHA=""
+PREVIOUS_RELEASE_ORIGIN=""
 ROLLBACK_AVAILABLE=false
 
-if [ -n "$PREVIOUS_API_DIGEST" ] && [ -n "$PREVIOUS_ADMIN_DIGEST" ]; then
-  PREVIOUS_API_SOURCE_SHA="$(image_source_revision "$PREVIOUS_API_DIGEST")"
-  PREVIOUS_ADMIN_SOURCE_SHA="$(image_source_revision "$PREVIOUS_ADMIN_DIGEST")"
-  [ "$PREVIOUS_API_SOURCE_SHA" = "$PREVIOUS_ADMIN_SOURCE_SHA" ] || \
-    die "الإصدار السابق يجمع صورتين من commitين مختلفين؛ أصلح الحالة يدوياً"
-  PREVIOUS_SOURCE_SHA="$PREVIOUS_API_SOURCE_SHA"
-  for previous_digest in "$PREVIOUS_API_DIGEST" "$PREVIOUS_ADMIN_DIGEST"; do
-    cosign verify \
-      --certificate-identity "$SIGNER_IDENTITY" \
-      --certificate-oidc-issuer "$OIDC_ISSUER" \
-      --certificate-github-workflow-sha "$PREVIOUS_SOURCE_SHA" \
-      "$previous_digest" >/dev/null 2>&1 || \
-      die "الإصدار السابق غير موثوق للعودة الآلية؛ يلزم bootstrap يدوي"
+if read_last_verified_release; then
+  PREVIOUS_API_DIGEST="$HISTORY_API_DIGEST"
+  PREVIOUS_ADMIN_DIGEST="$HISTORY_ADMIN_DIGEST"
+  PREVIOUS_SOURCE_SHA="${HISTORY_TAG#sha-}"
+  PREVIOUS_RELEASE_ORIGIN="سجل النشرات المتحقق منها"
+else
+  if [ -e "$history_file" ] && [ -s "$history_file" ]; then
+    printf 'تحذير: تعذّرت قراءة آخر نشر متحقق منه من %s؛ الرجوع إلى الحاويات العاملة.\n' \
+      "$history_file" >&2
+  fi
+  PREVIOUS_API_DIGEST="$(running_service_digest api "$API_REPOSITORY")"
+  PREVIOUS_ADMIN_DIGEST="$(running_service_digest admin "$ADMIN_REPOSITORY")"
+  if [ -n "$PREVIOUS_API_DIGEST" ] && [ -n "$PREVIOUS_ADMIN_DIGEST" ]; then
+    PREVIOUS_API_SOURCE_SHA="$(image_source_revision "$PREVIOUS_API_DIGEST")"
+    PREVIOUS_ADMIN_SOURCE_SHA="$(image_source_revision "$PREVIOUS_ADMIN_DIGEST")"
+    [ "$PREVIOUS_API_SOURCE_SHA" = "$PREVIOUS_ADMIN_SOURCE_SHA" ] || \
+      die "الإصدار السابق يجمع صورتين من commitين مختلفين؛ أصلح الحالة يدوياً"
+    PREVIOUS_SOURCE_SHA="$PREVIOUS_API_SOURCE_SHA"
+    PREVIOUS_RELEASE_ORIGIN="الحاويات العاملة (لا سجل نشرات بعد)"
+  elif [ -n "$PREVIOUS_API_DIGEST" ] || [ -n "$PREVIOUS_ADMIN_DIGEST" ]; then
+    die "الإصدار السابق غير مكتمل؛ أصلح زوج api/admin قبل نشر جديد"
+  fi
+fi
+
+# التحقق من توقيع هدف العودة يعيد المحاولة على الأعطال العابرة ويُظهر خطأ
+# cosign بدل كتمه. وعند فشل نهائي (هوية توقيع قديمة، انقطاع sigstore طويل)
+# يبقى النشر ممكناً بلا عودة آلية عبر DEPLOY_ALLOW_UNVERIFIED_PREVIOUS=1 —
+# مخرج bootstrap موثق بدل قفل كل النشرات حتى تُزال الحاويات يدوياً.
+verify_previous_release_digest() {
+  local digest="$1"
+  local attempt
+
+  COSIGN_PREVIOUS_OUTPUT=""
+  for attempt in 1 2 3; do
+    if COSIGN_PREVIOUS_OUTPUT="$(
+      cosign verify \
+        --certificate-identity "$SIGNER_IDENTITY" \
+        --certificate-oidc-issuer "$OIDC_ISSUER" \
+        --certificate-github-workflow-sha "$PREVIOUS_SOURCE_SHA" \
+        "$digest" 2>&1 >/dev/null
+    )"; then
+      return 0
+    fi
+    if [ "$attempt" -lt 3 ]; then
+      printf 'فشل مؤقت في التحقق من توقيع الإصدار السابق (%s/3)؛ إعادة المحاولة بعد 5 ثوانٍ.\n' \
+        "$attempt" >&2
+      sleep 5
+    fi
   done
-  ROLLBACK_AVAILABLE=true
-  printf '==> [%s] الإصدار السابق الموثوق المحفوظ للعودة (%s)\n' \
-    "$STACK_NAME" "$PREVIOUS_SOURCE_SHA"
-  printf '    api:   %s\n' "$PREVIOUS_API_DIGEST"
-  printf '    admin: %s\n' "$PREVIOUS_ADMIN_DIGEST"
-elif [ -n "$PREVIOUS_API_DIGEST" ] || [ -n "$PREVIOUS_ADMIN_DIGEST" ]; then
-  die "الإصدار السابق غير مكتمل؛ أصلح زوج api/admin قبل نشر جديد"
+  return 1
+}
+
+if [ -n "$PREVIOUS_SOURCE_SHA" ]; then
+  PREVIOUS_RELEASE_TRUSTED=true
+  for previous_digest in "$PREVIOUS_API_DIGEST" "$PREVIOUS_ADMIN_DIGEST"; do
+    if ! verify_previous_release_digest "$previous_digest"; then
+      PREVIOUS_RELEASE_TRUSTED=false
+      printf 'فشل التحقق من توقيع الإصدار السابق %s:\n%s\n' \
+        "$previous_digest" "$COSIGN_PREVIOUS_OUTPUT" >&2
+      break
+    fi
+  done
+  if $PREVIOUS_RELEASE_TRUSTED; then
+    ROLLBACK_AVAILABLE=true
+    printf '==> [%s] الإصدار السابق الموثوق المحفوظ للعودة (%s) — المصدر: %s\n' \
+      "$STACK_NAME" "$PREVIOUS_SOURCE_SHA" "$PREVIOUS_RELEASE_ORIGIN"
+    printf '    api:   %s\n' "$PREVIOUS_API_DIGEST"
+    printf '    admin: %s\n' "$PREVIOUS_ADMIN_DIGEST"
+  elif [ "${DEPLOY_ALLOW_UNVERIFIED_PREVIOUS:-0}" = "1" ]; then
+    printf 'تحذير: المتابعة بلا عودة آلية (DEPLOY_ALLOW_UNVERIFIED_PREVIOUS=1).\n' >&2
+    PREVIOUS_SOURCE_SHA=""
+    ROLLBACK_AVAILABLE=false
+  else
+    die "الإصدار السابق غير موثوق للعودة الآلية؛ أصلح الحالة يدوياً أو صدّر DEPLOY_ALLOW_UNVERIFIED_PREVIOUS=1 للنشر بلا عودة آلية (bootstrap)"
+  fi
 else
   printf '==> [%s] لا يوجد إصدار تطبيق سابق عامل (نشر أول)\n' "$STACK_NAME"
 fi
@@ -464,7 +580,15 @@ service_container_id() {
   local container_output container_id
   local ids=()
 
-  container_output="$(compose ps -a -q "$service")" || return 1
+  # ليس `compose ps -a -q`: ذاك يعيد حاويات `compose run` العابرة أيضاً،
+  # وواحدة يتيمة تكسر شرط «حاوية واحدة بالضبط» لكل قراءة حالة لاحقة.
+  container_output="$(
+    docker ps -a \
+      --filter "label=com.docker.compose.project=${PROJECT_NAME}" \
+      --filter "label=com.docker.compose.service=${service}" \
+      --filter 'label=com.docker.compose.oneoff=False' \
+      --format '{{.ID}}'
+  )" || return 1
   while IFS= read -r container_id; do
     [ -n "$container_id" ] && ids+=("$container_id")
   done <<< "$container_output"
@@ -737,11 +861,26 @@ ADMIN_SOURCE_SHA="$(image_source_revision "$ADMIN_DIGEST")"
 
 printf '==> التحقق من توقيعي الصورتين والـcommit المصدر بالـdigest\n'
 for digest in "$API_DIGEST" "$ADMIN_DIGEST"; do
-  if ! cosign verify \
-      --certificate-identity "$SIGNER_IDENTITY" \
-      --certificate-oidc-issuer "$OIDC_ISSUER" \
-      --certificate-github-workflow-sha "$EXPECTED_SOURCE_SHA" \
-      "$digest" >/dev/null 2>&1; then
+  release_signature_verified=false
+  for verify_attempt in 1 2 3; do
+    if cosign_release_output="$(
+      cosign verify \
+        --certificate-identity "$SIGNER_IDENTITY" \
+        --certificate-oidc-issuer "$OIDC_ISSUER" \
+        --certificate-github-workflow-sha "$EXPECTED_SOURCE_SHA" \
+        "$digest" 2>&1 >/dev/null
+    )"; then
+      release_signature_verified=true
+      break
+    fi
+    if [ "$verify_attempt" -lt 3 ]; then
+      printf 'فشل مؤقت في التحقق من توقيع %s (%s/3)؛ إعادة المحاولة بعد 5 ثوانٍ.\n' \
+        "$digest" "$verify_attempt" >&2
+      sleep 5
+    fi
+  done
+  if ! $release_signature_verified; then
+    printf '%s\n' "$cosign_release_output" >&2
     die "فشل التحقق من توقيع $digest؛ الصورة لا تُشغَّل"
   fi
   printf '    موقَّعة وموثوقة: %s\n' "$digest"
@@ -795,8 +934,8 @@ if [ -n "$API_URL" ]; then
 fi
 
 # لا يُكتب سجل النشرات إلا بعد نجاح الهجرة وكل فحوص الصحة المطلوبة. يحوي
-# digest الصورتين، سابقتيهما، ومسار النسخة، كي تكون العودة قابلة للتدقيق.
-history_file="${DEPLOY_STATE_DIR}/${STACK_NAME}-history.tsv"
+# digest الصورتين، سابقتيهما، ومسار النسخة — وهو مصدر هدف العودة في النشر
+# التالي، فلا يُلتقط إصدار مكسور تركه نشر فاشل عاملاً.
 if [ -e "$history_file" ] || [ -L "$history_file" ]; then
   if [ ! -f "$history_file" ] || [ -L "$history_file" ]; then
     die "ملف سجل النشر غير آمن"

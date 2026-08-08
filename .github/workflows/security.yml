@@ -9,15 +9,21 @@ on:
     - cron: '30 3 * * 6'
   workflow_dispatch:
 
+# PR pushes cancel their superseded runs. Push, cron, and dispatch runs on
+# main share one group and must queue instead of cancelling each other: the
+# publish gate needs a completed push run for every main commit, and a
+# cancelled run permanently fails that commit's gate.
 concurrency:
   group: security-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 jobs:
   repository:
+    # هذا الاسم بوابة يعتمدها publish حرفياً عبر
+    # scripts/wait-for-workflow-gates.py — لا تغيّره دون تحديث GATES هناك.
     name: Repository vulnerabilities and IaC
     runs-on: ubuntu-latest
     timeout-minutes: 15
