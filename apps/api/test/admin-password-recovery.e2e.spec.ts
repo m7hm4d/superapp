@@ -209,6 +209,43 @@ describe('admin password change and TOTP recovery', () => {
     expect(after.body.remaining).toBe(8);
   });
 
+  /**
+   * توزيع الحروف موحّد.
+   *
+   * كان التوليد `randomBytes(n) % ALPHABET.length` — موحّداً بمحض المصادفة
+   * (‏256 = 32 × 8). حرف واحد يُضاف إلى الأبجدية أو يُحذف منها كان يجعل
+   * الرموز منحازة بصمت، وأبجديةٌ تعليقها يدعو إلى تنقيتها مُرشَّحة لذلك.
+   *
+   * والانحياز يقلّص فضاء التخمين فعلياً — لا يبطله لكنه يضيّقه بلا أن
+   * يلاحظ أحد.
+   */
+  it('حروف الرموز موزّعة بلا انحياز', async () => {
+    const token = await adminSession();
+    const seen = new Map<string, number>();
+    // مئة رمز = ألفا حرف: كافية لكشف انحياز بنيوي لا لتقلّب عشوائي
+    for (let round = 0; round < 10; round++) {
+      const res = await request(http)
+        .post('/api/v1/auth/admin/recovery-codes')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ password: ORIGINAL, totp: await totpNow() })
+        .expect(200);
+      for (const code of res.body.codes as string[]) {
+        for (const ch of code.replace(/-/g, '')) seen.set(ch, (seen.get(ch) ?? 0) + 1);
+      }
+    }
+
+    const counts = [...seen.values()];
+    const total = counts.reduce((a, b) => a + b, 0);
+    const expected = total / 32;
+    expect(seen.size).toBe(32); // كل حرف ظهر ولو مرة
+    // لا حرف يبتعد عن المتوقَّع أكثر من النصف — عتبة واسعة تمسك الانحياز
+    // البنيوي (`% 33` مثلاً يعطي حرفاً واحداً نصفَ نصيب البقية) ولا ترتجف
+    // من تقلّب عشوائي طبيعي.
+    for (const [ch, n] of seen) {
+      expect(Math.abs(n - expected) / expected, `الحرف ${ch}`).toBeLessThan(0.5);
+    }
+  }, 60_000);
+
   /** مجموعة جديدة تُبطل ما سبقها: ورقة ضاعت لا تبقى مفتاحاً */
   it('التوليد يُبطل المجموعة السابقة', async () => {
     const token = await adminSession();

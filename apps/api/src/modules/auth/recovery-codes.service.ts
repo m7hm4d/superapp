@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { hash, verify } from 'argon2';
 import { and, eq, isNull } from 'drizzle-orm';
-import { randomBytes } from 'node:crypto';
+import { randomInt } from 'node:crypto';
 import { DB, DbClient } from '../../db/drizzle.module';
 import { adminRecoveryCodes } from '../../db/schema';
 import { ARGON2_OPTIONS } from './auth.service';
@@ -15,10 +15,19 @@ const CODE_COUNT = 10;
  */
 const ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 
-/** أربع مجموعات من خمسة: قابل للقراءة والنسخ يدوياً */
+/**
+ * أربع مجموعات من خمسة: قابل للقراءة والنسخ يدوياً.
+ *
+ * ‏`randomInt` لا `randomBytes(n) % length`. الثانية موحَّدة التوزيع اليوم
+ * بمحض المصادفة — 256 = 32 × 8 — فلو أُضيف حرف إلى الأبجدية أو حُذف منها
+ * لصارت الرموز منحازة بصمت، ولا شيء في الشيفرة يُنبّه. وهذه الأبجدية
+ * مُرشَّحة للتعديل: تعليقها نفسه يدعو إلى تنقيتها من الأحرف المتشابهة.
+ *
+ * و`randomInt` غير منحازة مهما كان حجم الأبجدية — ترفض العيّنات الزائدة
+ * وتعيد السحب.
+ */
 function generateCode(): string {
-  const bytes = randomBytes(20);
-  const chars = [...bytes].map((b) => ALPHABET[b % ALPHABET.length]);
+  const chars = Array.from({ length: 20 }, () => ALPHABET[randomInt(ALPHABET.length)]);
   return [0, 5, 10, 15].map((i) => chars.slice(i, i + 5).join('')).join('-');
 }
 
