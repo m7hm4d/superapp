@@ -153,17 +153,7 @@
     ],
     [
       "ledger",
-      "driverProfiles",
-      "apps/api/src/modules/ledger/ledger.service.ts"
-    ],
-    [
-      "ledger",
       "orders",
-      "apps/api/src/modules/ledger/ledger.service.ts"
-    ],
-    [
-      "ledger",
-      "users",
       "apps/api/src/modules/ledger/ledger.service.ts"
     ],
     [
