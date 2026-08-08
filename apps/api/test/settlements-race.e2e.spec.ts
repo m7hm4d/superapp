@@ -68,7 +68,15 @@ describe('settlement doubling guarantees', () => {
       .returning({ id: orders.id });
     await db.insert(ledgerEntries).values([
       { entryType: 'delivery_fee', orderId: order.id, driverId: driverProfileId, amountIqd: deliveryFeeIqd },
-      { entryType: 'cash_collected', orderId: order.id, driverId: driverProfileId, amountIqd: totalIqd },
+      // ‏vendorId لازم كما في المسار الحقيقي: مستحقات المخبز تُصفّى بعمود
+      // الدفتر لا بانضمام إلى الطلب، فقيدٌ بلا بائع يسقط من الحساب صامتاً.
+      {
+        entryType: 'cash_collected',
+        orderId: order.id,
+        vendorId: vendorProfileId,
+        driverId: driverProfileId,
+        amountIqd: totalIqd,
+      },
     ]);
     return order.id;
   }

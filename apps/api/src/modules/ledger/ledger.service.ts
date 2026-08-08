@@ -9,9 +9,10 @@ import { LedgerEntryType, OrderStatus, SettlementStatus } from '@superapp/shared
 import type { LedgerSummaryView } from '@superapp/shared';
 import { and, eq, gte, inArray, lte, sql } from 'drizzle-orm';
 import { DB, DbClient } from '../../db/drizzle.module';
+import { DriverDirectoryService } from '../deliveries/driver-directory.service';
 import { OrderDirectoryService } from '../orders/order-directory.service';
 import { VendorDirectoryService } from '../vendors/vendor-directory.service';
-import { driverProfiles, ledgerEntries, orders, settlements, users } from '../../db/schema';
+import { ledgerEntries, orders, settlements } from '../../db/schema';
 
 /** نوع معاملة Drizzle — مطابق بنيوياً لنوع orders.service (استخراج من DbClient نفسه) */
 export type DbTx = Parameters<Parameters<DbClient['transaction']>[0]>[0];
@@ -75,6 +76,7 @@ export class LedgerService {
     @Inject(DB) private readonly db: DbClient,
     private readonly ordersDirectory: OrderDirectoryService,
     private readonly vendors: VendorDirectoryService,
+    private readonly drivers: DriverDirectoryService,
   ) {}
 
   // ─────────────────────────── الكتابة داخل معاملات المستدعي ───────────────────────────
@@ -103,6 +105,11 @@ export class LedgerService {
       {
         entryType: LedgerEntryType.CASH_COLLECTED,
         orderId: args.orderId,
+        // البائع يُقيَّد هنا أيضاً: القيمة بين يدينا، وبدونها لا يستطيع
+        // الدفتر أن يجيب «ما بذمة هذا السائق لهذا المخبز» إلا بالانضمام
+        // إلى `orders` — وهو جدول لا يملكه، والانضمام يُصفّي به فلا يمكن
+        // استبداله بمنفذ. قيدٌ مالي يجب أن يعرف طرفيه.
+        vendorId: args.vendorId,
         driverId: args.driverId,
         amountIqd: args.totalIqd,
       },
@@ -218,23 +225,41 @@ export class LedgerService {
 
   /** المقلوب لشاشة المخبز: مستحقاته لدى كل سائق من طلبات مسلّمة غير مسوّاة */
   async vendorOutstandingByDriver(vendorId: string): Promise<VendorOutstandingByDriverRow[]> {
-    const rows = await this.db
-      .select({
-        orderId: orders.id,
-        driverId: driverProfiles.id,
-        driverName: users.fullName,
-        subtotalIqd: orders.subtotalIqd,
-      })
+    // التصفية صارت على `ledger_entries.vendor_id` — عمود الدفتر نفسه، وله
+    // فهرس `ledger_vendor_idx`. كانت على `orders.vendor_id` عبر انضمام، وهو
+    // ما منع استبداله بمنفذ: المنفذ يُثري ولا يُصفّي.
+    const entries = await this.db
+      .select({ orderId: ledgerEntries.orderId, driverId: ledgerEntries.driverId })
       .from(ledgerEntries)
-      .innerJoin(orders, eq(orders.id, ledgerEntries.orderId))
-      .innerJoin(driverProfiles, eq(driverProfiles.id, ledgerEntries.driverId))
-      .innerJoin(users, eq(users.id, driverProfiles.userId))
       .where(
         and(
-          eq(orders.vendorId, vendorId),
+          eq(ledgerEntries.vendorId, vendorId),
           eq(ledgerEntries.entryType, LedgerEntryType.CASH_COLLECTED),
         ),
       );
+
+    const [ordersById, driversById] = await Promise.all([
+      this.ordersDirectory.summariesFor(
+        entries.map((e) => e.orderId).filter((id): id is string => id !== null),
+      ),
+      this.drivers.summariesFor(
+        entries.map((e) => e.driverId).filter((id): id is string => id !== null),
+      ),
+    ]);
+
+    const rows = entries.flatMap((entry) => {
+      const order = entry.orderId ? ordersById.get(entry.orderId) : undefined;
+      const driver = entry.driverId ? driversById.get(entry.driverId) : undefined;
+      if (!order || !driver) return [];
+      return [
+        {
+          orderId: order.id,
+          driverId: driver.id,
+          driverName: driver.fullName,
+          subtotalIqd: order.subtotalIqd,
+        },
+      ];
+    });
 
     const settledOrderIds = await this.settledOrderIdsFor({ vendorId });
 
