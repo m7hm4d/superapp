@@ -1,6 +1,6 @@
 packages:
-  - "apps/*"
-  - "packages/*"
+  - 'apps/*'
+  - 'packages/*'
 overrides:
   # ثغرات في نسخ متعدية لا تملك حزمها ترقيةً بعد. تُحذف عند لحاق المنبع.
   # ‏postcss: تجاوز مسار عبر sourceMappingURL و XSS في stringify — نستهلكه
@@ -9,9 +9,16 @@ overrides:
   # ‏sharp: ثغرات libvips الموروثة (CVE-2026-33327 وأخواتها). يستدعيه next
   # لتحسين الصور، فالمدخل قد يكون صورة من الخارج.
   sharp: ^0.35.0
+  # ‏@esbuild-kit متوقف ولا يرفع esbuild القديم، ونسخته تسمح لأي موقع
+  # تطوير بالوصول إلى خادم التحويل. الحزمة أداة drizzle محلية فقط، لكن
+  # إبقاء نسخة ذات رقعة متاحة بلا داعٍ يترك تنبيه Dependabot مفتوحاً.
+  '@esbuild-kit/core-utils>esbuild': ^0.25.0
+  # ‏xcode يستعمل uuid.v4 فقط، وهي باقية في 11.x. النسخة 7.x تسمح بانهيار
+  # متعمّد عند تمرير خيارات غير موثوقة بسبب تحقق غير صحيح من الطول.
+  'xcode>uuid': ^11.1.1
   react-native-reanimated: ~4.1.1
   expo-secure-store: ~15.0.0
-  "@expo/vector-icons": ~15.0.0
+  '@expo/vector-icons': ~15.0.0
   react-native: 0.81.5
   react: 19.1.0
   react-dom: 19.1.0
