@@ -3,7 +3,12 @@ import { IBM_Plex_Sans_Arabic } from 'next/font/google';
 import type { ReactNode } from 'react';
 import './globals.css';
 import { Providers } from './providers';
-import { RUNTIME_KEY, serverApiUrl } from '@/lib/runtime-config';
+import {
+  REVISION_RUNTIME_KEY,
+  RUNTIME_KEY,
+  serverApiUrl,
+  serverRevision,
+} from '@/lib/runtime-config';
 
 const plexArabic = IBM_Plex_Sans_Arabic({
   subsets: ['arabic', 'latin'],
@@ -25,13 +30,17 @@ export const dynamic = 'force-dynamic';
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   const apiUrl = serverApiUrl();
+  const revision = serverRevision();
   return (
     <html lang="ar" dir="rtl" className={plexArabic.variable}>
       <head>
         {/* حقن قبل أي سكربت تطبيق: العميل يقرأه عند أول استدعاء */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `window[${JSON.stringify(RUNTIME_KEY)}]=${JSON.stringify(apiUrl)}`,
+            __html: [
+              `window[${JSON.stringify(RUNTIME_KEY)}]=${JSON.stringify(apiUrl)}`,
+              `window[${JSON.stringify(REVISION_RUNTIME_KEY)}]=${JSON.stringify(revision)}`,
+            ].join(';'),
           }}
         />
       </head>

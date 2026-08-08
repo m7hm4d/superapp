@@ -11,16 +11,27 @@
  */
 
 const RUNTIME_KEY = '__SUPERAPP_API_URL__';
+const REVISION_RUNTIME_KEY = '__SUPERAPP_REVISION__';
 
 declare global {
   interface Window {
     [RUNTIME_KEY]?: string;
+    [REVISION_RUNTIME_KEY]?: string;
   }
 }
 
 /** يُقرأ على الخادم من البيئة — يُستدعى في مكوّن خادم فقط */
 export function serverApiUrl(): string {
-  return process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+  return (
+    process.env.API_URL ??
+    process.env.NEXT_PUBLIC_API_URL ??
+    'http://localhost:3000'
+  );
+}
+
+/** commit كامل يمرره deploy.sh بعد تحقق الصورة، ويظهر لإثبات مسار الحافة */
+export function serverRevision(): string {
+  return process.env.APP_REVISION ?? 'unknown';
 }
 
 /**
@@ -35,4 +46,4 @@ export function apiUrl(): string {
   return process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
 }
 
-export { RUNTIME_KEY };
+export { REVISION_RUNTIME_KEY, RUNTIME_KEY };

@@ -7,8 +7,14 @@ import { z } from 'zod';
 export const DEFAULT_CORS_ORIGINS = 'http://localhost:3001';
 
 export const envSchema = z.object({
-  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  NODE_ENV: z
+    .enum(['development', 'test', 'production'])
+    .default('development'),
   PORT: z.coerce.number().int().default(3000),
+  APP_REVISION: z
+    .string()
+    .regex(/^(unknown|[0-9a-f]{40})$/)
+    .default('unknown'),
   DATABASE_URL: z.string().url(),
   JWT_ACCESS_SECRET: z.string().min(16),
   JWT_ACCESS_TTL: z.string().default('15m'),
