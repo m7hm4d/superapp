@@ -187,17 +187,48 @@ export class TokenService {
    * يُبطل كل جلسات المستخدم — لتغيّر الدور وما شابهه ممّا يخصّ الحساب لا
    * جهازاً بعينه. يبثّ لكل عائلة كي تُقطع اتصالاتها القائمة.
    */
-  async revokeAllForUser(userId: string, reason: string): Promise<number> {
-    const revoked = await this.db
+  /**
+   * يُبطل داخل معاملة المُستدعي ويعيد العائلات — بلا بثّ.
+   *
+   * البثّ مسؤولية من يلتزم: انظر `announceRevoked`.
+   */
+  async revokeAllForUserTx(userId: string, executor: DbExecutor): Promise<string[]> {
+    const revoked = await executor
+      .update(refreshTokens)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(refreshTokens.userId, userId), isNull(refreshTokens.revokedAt)))
+      .returning({ familyId: refreshTokens.familyId });
+    return [...new Set(revoked.map((r) => r.familyId))];
+  }
+
+  async revokeAllForUser(
+    userId: string,
+    reason: string,
+    executor: DbExecutor = this.db,
+  ): Promise<number> {
+    const revoked = await executor
       .update(refreshTokens)
       .set({ revokedAt: new Date() })
       .where(and(eq(refreshTokens.userId, userId), isNull(refreshTokens.revokedAt)))
       .returning({ familyId: refreshTokens.familyId });
 
-    for (const familyId of new Set(revoked.map((r) => r.familyId))) {
+    // البثّ بعد الالتزام لا داخل المعاملة: لو تراجعت لبقيت الجلسات حيّة
+    // بينما قُطعت اتصالاتها — حالة أسوأ من كلتيهما.
+    const families = [...new Set(revoked.map((r) => r.familyId))];
+    if (executor === this.db) this.announceRevoked(userId, families, reason);
+    return revoked.length;
+  }
+
+  /**
+   * يبثّ قطع الاتصالات لعائلات أُبطلت.
+   *
+   * منفصل عن الإبطال كي يستدعيه المُستدعي **بعد** التزام معاملته: البثّ
+   * داخل معاملة قد تتراجع يقطع اتصالات جلسات ما زالت صالحة.
+   */
+  announceRevoked(userId: string, familyIds: readonly string[], reason: string): void {
+    for (const familyId of familyIds) {
       this.emitter.emit('session.revoked', { userId, familyId, reason });
     }
-    return revoked.length;
   }
 
   async revokeFamily(familyId: string): Promise<void> {

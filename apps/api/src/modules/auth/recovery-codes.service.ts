@@ -106,6 +106,11 @@ export class RecoveryCodesService {
     return false;
   }
 
+  /** يُبطل كل رموز المستخدم — عند تغيّر العامل الثاني */
+  async revokeAll(userId: string): Promise<void> {
+    await this.db.delete(adminRecoveryCodes).where(eq(adminRecoveryCodes.userId, userId));
+  }
+
   /** كم بقي — تعرضه اللوحة كي يعرف المسؤول متى يولّد مجموعة جديدة */
   async remaining(userId: string): Promise<number> {
     const rows = await this.db

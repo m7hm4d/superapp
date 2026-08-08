@@ -151,6 +151,48 @@ describe('admin password change and TOTP recovery', () => {
     await restore();
   });
 
+  /**
+   * سلسلة الاستيلاء التي كانت مفتوحة:
+   *
+   *   جلسة مسروقة → totp/setup → توليد رمز من السر المُعاد → totp/enable
+   *   → تغيير كلمة المرور بعامل المهاجم → إبطال جلسات الضحية
+   *
+   * الحلقة الأولى هي المكسورة الآن: جلسة وحدها لا تستبدل عاملاً قائماً.
+   */
+  it('جلسة وحدها لا تستبدل العامل الثاني — سلسلة الاستيلاء مقطوعة', async () => {
+    const token = await adminSession();
+    const res = await request(http)
+      .post('/api/v1/auth/admin/totp/setup')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(401);
+    expect(res.body.code).toBe('REAUTH_REQUIRED');
+  });
+
+  it('الاستبدال يمرّ بكلمة المرور مع العامل الحالي', async () => {
+    const token = await adminSession();
+    await request(http)
+      .post('/api/v1/auth/admin/totp/setup')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ password: ORIGINAL, totp: await totpNow() })
+      .expect(201);
+  });
+
+  /** ومن ضاع جهازه يستبدل برمز استرداد — وإلا لبقي محبوساً خارج حسابه */
+  it('أو برمز استرداد لمن ضاع جهازه', async () => {
+    const token = await adminSession();
+    const gen = await request(http)
+      .post('/api/v1/auth/admin/recovery-codes')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ password: ORIGINAL, totp: await totpNow() })
+      .expect(200);
+
+    await request(http)
+      .post('/api/v1/auth/admin/totp/setup')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ password: ORIGINAL, recoveryCode: (gen.body.codes as string[])[0] })
+      .expect(201);
+  });
+
   // ─────────────────────────── رموز الاسترداد ───────────────────────────
 
   it('التوليد يشترط كلمة المرور ورمز TOTP', async () => {
@@ -210,41 +252,30 @@ describe('admin password change and TOTP recovery', () => {
   });
 
   /**
-   * توزيع الحروف موحّد.
+   * شكل الرمز وأبجديته — فحص حتمي.
    *
-   * كان التوليد `randomBytes(n) % ALPHABET.length` — موحّداً بمحض المصادفة
-   * (‏256 = 32 × 8). حرف واحد يُضاف إلى الأبجدية أو يُحذف منها كان يجعل
-   * الرموز منحازة بصمت، وأبجديةٌ تعليقها يدعو إلى تنقيتها مُرشَّحة لذلك.
+   * كان هنا اختبار توزيع إحصائي على ألفَي حرف بعتبة أربعة انحرافات: يتذبذب
+   * نحو مرة كل 528 تشغيلاً، وهو كثير لفحص يعمل على كل طلب.
    *
-   * والانحياز يقلّص فضاء التخمين فعلياً — لا يبطله لكنه يضيّقه بلا أن
-   * يلاحظ أحد.
+   * وضمانُ عدم الانحياز ليس شغل هذه الحزمة أصلاً: `randomInt` مسؤولية
+   * المكتبة القياسية، والنمط الخطر (`%` على بايت عشوائي) يُسقطه CodeQL
+   * حتمياً — وقد أسقط أول التزام في هذا الطلب فعلاً.
    */
-  it('حروف الرموز موزّعة بلا انحياز', async () => {
+  it('الرموز بالشكل والأبجدية المتوقَّعين، ولا تكرار', async () => {
     const token = await adminSession();
-    const seen = new Map<string, number>();
-    // مئة رمز = ألفا حرف: كافية لكشف انحياز بنيوي لا لتقلّب عشوائي
-    for (let round = 0; round < 10; round++) {
-      const res = await request(http)
-        .post('/api/v1/auth/admin/recovery-codes')
-        .set('Authorization', `Bearer ${token}`)
-        .send({ password: ORIGINAL, totp: await totpNow() })
-        .expect(200);
-      for (const code of res.body.codes as string[]) {
-        for (const ch of code.replace(/-/g, '')) seen.set(ch, (seen.get(ch) ?? 0) + 1);
-      }
-    }
+    const res = await request(http)
+      .post('/api/v1/auth/admin/recovery-codes')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ password: ORIGINAL, totp: await totpNow() })
+      .expect(200);
 
-    const counts = [...seen.values()];
-    const total = counts.reduce((a, b) => a + b, 0);
-    const expected = total / 32;
-    expect(seen.size).toBe(32); // كل حرف ظهر ولو مرة
-    // لا حرف يبتعد عن المتوقَّع أكثر من النصف — عتبة واسعة تمسك الانحياز
-    // البنيوي (`% 33` مثلاً يعطي حرفاً واحداً نصفَ نصيب البقية) ولا ترتجف
-    // من تقلّب عشوائي طبيعي.
-    for (const [ch, n] of seen) {
-      expect(Math.abs(n - expected) / expected, `الحرف ${ch}`).toBeLessThan(0.5);
+    const codes = res.body.codes as string[];
+    expect(new Set(codes).size).toBe(codes.length);
+    for (const code of codes) {
+      // أربع مجموعات من خمسة، وأبجدية بلا أحرف متشابهة
+      expect(code).toMatch(/^[2-9A-HJ-NP-Z]{5}(-[2-9A-HJ-NP-Z]{5}){3}$/);
     }
-  }, 60_000);
+  });
 
   /** مجموعة جديدة تُبطل ما سبقها: ورقة ضاعت لا تبقى مفتاحاً */
   it('التوليد يُبطل المجموعة السابقة', async () => {

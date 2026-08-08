@@ -189,13 +189,33 @@ export class AdminAuthService {
    * توليد سر TOTP جديد في خانة "قيد التسجيل" — لا يمس السر الفعّال،
    * فإعادة التسجيل لا تُعطّل تطبيق المصادقة القائم قبل تأكيد الجديد.
    */
-  async setupTotp(userId: string): Promise<{ secret: string; otpauthUrl: string }> {
+  /**
+   * يبدأ تسجيل TOTP.
+   *
+   * **استبدال** عامل قائم يشترط إثباتاً حديثاً — كلمة المرور مع العامل
+   * الحالي أو رمز استرداد. بلا هذا كانت جلسة مسروقة وحدها تكفي لاستبدال
+   * عامل الضحية: يطلب المهاجم سرّاً جديداً، ويولّد منه رمزاً، ويفعّله —
+   * فيملك العامل الثاني. ولو عرف كلمة المرور أيضاً أتبعها بتغييرها فأبطل
+   * جلسات الضحية، وصار اختراق ساعةٍ استيلاءً دائماً.
+   *
+   * أما التسجيل **الأول** فلا إثبات له غير توكن التسجيل المحدود، وهو لا
+   * يصدر إلا بعد كلمة المرور — ولا عامل قائم يُحتجّ به أصلاً.
+   */
+  async setupTotp(
+    userId: string,
+    reauth?: { password: string; totp?: string; recoveryCode?: string },
+  ): Promise<{ secret: string; otpauthUrl: string }> {
     const [cred] = await this.db
       .select()
       .from(adminCredentials)
       .where(eq(adminCredentials.userId, userId))
       .limit(1);
     if (!cred) throw new ForbiddenException({ code: 'NO_ADMIN_CREDENTIALS' });
+
+    if (cred.totpEnabled) {
+      if (!reauth) throw new UnauthorizedException({ code: 'REAUTH_REQUIRED' });
+      await this.assertPasswordAndSecondFactor(userId, reauth.password, reauth);
+    }
 
     const secret = totp.generateSecret();
     await this.db
@@ -216,6 +236,7 @@ export class AdminAuthService {
       .where(eq(adminCredentials.userId, userId))
       .limit(1);
     if (!cred?.pendingTotpSecret) throw new ForbiddenException({ code: 'TOTP_NOT_SETUP' });
+    const wasEnabled = cred.totpEnabled;
 
     const step = verifyTotpStep(token, cred.pendingTotpSecret);
     if (step === null) {
@@ -237,6 +258,16 @@ export class AdminAuthService {
     if (!user || user.role !== Role.ADMIN) {
       throw new ForbiddenException({ code: 'NO_ADMIN_CREDENTIALS' });
     }
+
+    // تغيّر العامل الثاني حدث أمني: تسقط معه الجلسات القائمة ورموز
+    // الاسترداد القديمة. لو بقيت الأخيرة لظلّ من يملك ورقة قديمة قادراً
+    // على تجاوز العامل الجديد.
+    if (wasEnabled) {
+      const families = await this.tokens.revokeAllForUser(userId, 'second factor replaced');
+      void families;
+      await this.recoveryCodes.revokeAll(userId);
+    }
+
     const tokens = await this.tokens.issuePairWithFamily(user);
     await this.events.record({
       ...ctx,
@@ -365,12 +396,20 @@ export class AdminAuthService {
       throw new BadRequestException({ code: 'PASSWORD_UNCHANGED' });
     }
 
-    await this.db
-      .update(users)
-      .set({ passwordHash: await argon2.hash(input.newPassword, ARGON2_OPTIONS) })
-      .where(eq(users.id, userId));
+    // التجزئة **قبل** فتح المعاملة: argon2 مصمَّمة بطيئة عمداً، وحسابها
+    // داخل المعاملة يُبقي أقفال الصفوف مفتوحة طوال ذلك البطء.
+    const passwordHash = await argon2.hash(input.newPassword, ARGON2_OPTIONS);
 
-    await this.tokens.revokeAllForUser(userId, 'password changed');
+    // الكتابتان في معاملة واحدة: كانتا متتاليتين، فسقوطُ الاتصال بينهما
+    // يغيّر كلمة المرور ويترك الجلسات القديمة حيّة — عكس الضمان تماماً،
+    // وفي اللحظة التي يحاول فيها صاحب الحساب احتواء اختراق.
+    const families = await this.db.transaction(async (tx) => {
+      await tx.update(users).set({ passwordHash }).where(eq(users.id, userId));
+      return this.tokens.revokeAllForUserTx(userId, tx);
+    });
+
+    // البثّ بعد الالتزام: قطع اتصالات جلسة ما زالت صالحة أسوأ من تأخير القطع
+    this.tokens.announceRevoked(userId, families, 'password changed');
     await this.events.record({ ...event, userId, outcome: 'session_revoked' });
     return { ok: true };
   }
@@ -382,7 +421,11 @@ export class AdminAuthService {
    * مفاتيح دخول دائمة. ولا يقبل رمز استرداد بديلاً هنا عمداً — رمزٌ واحد
    * يولّد عشرة يجعل المجموعة أبدية.
    */
-  async assertPasswordAndTotp(userId: string, password: string, totp: string): Promise<void> {
+  async assertPasswordAndSecondFactor(
+    userId: string,
+    password: string,
+    factor: { totp?: string; recoveryCode?: string },
+  ): Promise<void> {
     const [row] = await this.db
       .select({ cred: adminCredentials, user: users })
       .from(adminCredentials)
@@ -394,10 +437,16 @@ export class AdminAuthService {
     if (!(await argon2.verify(row.user.passwordHash, password))) {
       throw new UnauthorizedException({ code: 'INVALID_CREDENTIALS' });
     }
+    if (factor.recoveryCode) {
+      const consumed = await this.recoveryCodes.consume(userId, factor.recoveryCode);
+      if (!consumed) throw new UnauthorizedException({ code: 'RECOVERY_CODE_INVALID' });
+      return;
+    }
+    if (!factor.totp) throw new UnauthorizedException({ code: 'SECOND_FACTOR_REQUIRED' });
     if (!row.cred.totpEnabled || !row.cred.totpSecret) {
       throw new UnauthorizedException({ code: 'TOTP_NOT_ENABLED' });
     }
-    await this.consumeTotp(userId, row.cred.totpSecret, totp, {
+    await this.consumeTotp(userId, row.cred.totpSecret, factor.totp, {
       method: 'admin_password_totp' as const,
     });
   }

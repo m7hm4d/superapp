@@ -41,8 +41,20 @@ import { RealtimeModule } from './realtime/realtime.module';
           res.setHeader(REQUEST_ID_HEADER, id);
           return id;
         },
+        // قائمة صريحة لا قاعدة عامة: حقل حسّاس يُضاف ولا يُدرج هنا يُطبع
+        // كاملاً في السجلّ، ولا شيء ينبّه. تُراجَع مع كل حقل سرّي جديد.
         redact: {
-          paths: ['req.headers.authorization', 'req.body.password', 'req.body.refreshToken'],
+          paths: [
+            'req.headers.authorization',
+            'req.body.password',
+            'req.body.currentPassword',
+            'req.body.newPassword',
+            'req.body.refreshToken',
+            'req.body.totp',
+            'req.body.recoveryCode',
+            'req.body.secret',
+            'res.body.codes',
+          ],
           censor: '[redacted]',
         },
         transport:
