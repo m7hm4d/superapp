@@ -67,6 +67,34 @@ export const adminCredentials = pgTable('admin_credentials', {
 });
 
 /**
+ * رموز استرداد TOTP.
+ *
+ * الهاتف الضائع كان يعني تعديلاً يدوياً في قاعدة البيانات: لا مسار في
+ * المنتج يستعيد وصول مسؤول فقد جهازه. وهذه هي النافذة التي تُدفع الفرق
+ * فيها إلى تعطيل العامل الثاني كلّه.
+ *
+ * تُخزَّن **مجزّأة** كما كلمات المرور: من قرأ قاعدة البيانات لا يحصل على
+ * مفاتيح دخول جاهزة. والتجزئة argon2id نفسها لا sha256 — الرمز سرٌّ يقارَن،
+ * وبطء التجزئة هو ما يجعل تخمينه غير عملي.
+ *
+ * ولكل رمز استعمال واحد: `usedAt` يُختم عند الاستهلاك ولا يُحذف الصف، فيبقى
+ * في السجل أن رمزاً استُعمل ومتى.
+ */
+export const adminRecoveryCodes = pgTable(
+  'admin_recovery_codes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    codeHash: text('code_hash').notNull(),
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('admin_recovery_user_idx').on(t.userId)],
+);
+
+/**
  * مفاتيح المرور (WebAuthn) للإدارة: عامل مقاوم للتصيّد — الاعتماد مربوط
  * بالنطاق تشفيرياً، فصفحة مزيّفة لا تحصل على شيء قابل للتمرير (خلاف TOTP).
  * الاسترداد عند ضياع الهاتف يتكفّل به مزامنة المفاتيح (iCloud/Google).

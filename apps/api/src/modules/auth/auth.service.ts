@@ -24,8 +24,14 @@ import { TokenService } from './token.service';
 
 type UserRow = typeof users.$inferSelect;
 
-/** معايير OWASP لـ argon2id */
-const ARGON2_OPTIONS = {
+/**
+ * معايير OWASP لـargon2id — **مصدر واحد**.
+ *
+ * نسختان من هذه القيم تتباعدان بصمت: كلمة تُجزَّأ بمعايير وتُقارَن بأخرى
+ * تعمل (argon2 يقرأ المعايير من التجزئة نفسها)، لكن الحساب الذي أُنشئ
+ * بمعايير أضعف يبقى أضعف بلا أن يُلاحَظ.
+ */
+export const ARGON2_OPTIONS = {
   type: argon2id,
   memoryCost: 19456,
   timeCost: 2,
