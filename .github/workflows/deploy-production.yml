@@ -1,0 +1,1039 @@
+name: Deploy Production
+
+# Only a completed Publish run whose source branch is main can reach this
+# workflow. Pull requests never receive the production environment or secrets.
+on:
+  workflow_run:
+    workflows: [Publish]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+  # Keep every completion queued. The freshness checks make stale runs fail
+  # closed when they eventually start instead of allowing GitHub's default
+  # single-pending behaviour to cancel a newer deployment notification.
+  queue: max
+
+jobs:
+  deploy:
+    name: Deploy immutable image to production
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.event == 'push' &&
+      vars.PRODUCTION_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    # Includes the pre-migration PostgreSQL backup; do not kill a safe deploy
+    # halfway through merely because the database outgrows a short CI timeout.
+    timeout-minutes: 90
+
+    environment:
+      name: production
+      url: ${{ vars.PRODUCTION_ADMIN_URL }}
+
+    steps:
+      # workflow_run completions can arrive out of order. Refuse an older
+      # successful Publish run before transferring any deployment material.
+      - name: Reject a stale Publish completion
+        env:
+          API_URL: ${{ github.api_url }}
+          GITHUB_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          [[ "$API_URL" == https://* ]] || exit 1
+          [[ "$REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || exit 1
+          [[ "$SOURCE_SHA" =~ ^[0-9a-fA-F]{40}$ ]] || exit 1
+          main_sha=$(
+            curl \
+              -q \
+              --fail \
+              --silent \
+              --show-error \
+              --retry 3 \
+              --retry-all-errors \
+              --connect-timeout 10 \
+              --max-time 30 \
+              -H 'Accept: application/vnd.github+json' \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "${API_URL%/}/repos/${REPOSITORY}/git/ref/heads/main" |
+              jq -er '.object.sha'
+          )
+          [[ "$main_sha" =~ ^[0-9a-fA-F]{40}$ ]] || exit 1
+          [[ "${main_sha,,}" == "${SOURCE_SHA,,}" ]] || {
+            echo "stale Publish completion: source is no longer the main branch HEAD" >&2
+            exit 1
+          }
+
+      # workflow_run loads this workflow from the default branch. The release
+      # bundle itself must instead come from the exact commit Publish built.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+
+      - name: Build the exact-commit deployment bundle
+        env:
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          [[ "$SOURCE_SHA" =~ ^[0-9a-fA-F]{40}$ ]] || { echo "invalid source SHA" >&2; exit 1; }
+          checked_out_sha=$(git rev-parse HEAD)
+          [[ "${checked_out_sha,,}" == "${SOURCE_SHA,,}" ]] || {
+            echo "checkout does not match the published commit" >&2
+            exit 1
+          }
+          for source in \
+            docker-compose.prod.yml \
+            deploy/deploy.sh \
+            deploy/backup-db.sh \
+            deploy/validate-db-target.py \
+            deploy/verify-deployment.sh; do
+            [[ -f "$source" && ! -L "$source" ]] || {
+              echo "bundle source is not a regular repository file: $source" >&2
+              exit 1
+            }
+          done
+          bundle_root="$RUNNER_TEMP/superapp-deploy-bundle"
+          archive="$RUNNER_TEMP/superapp-deploy-bundle.tar.gz"
+          install -d -m 700 "$bundle_root/deploy"
+          install -m 600 docker-compose.prod.yml "$bundle_root/docker-compose.prod.yml"
+          install -m 700 deploy/deploy.sh "$bundle_root/deploy/deploy.sh"
+          install -m 700 deploy/backup-db.sh "$bundle_root/deploy/backup-db.sh"
+          install -m 400 deploy/validate-db-target.py "$bundle_root/deploy/validate-db-target.py"
+          install -m 700 deploy/verify-deployment.sh "$bundle_root/deploy/verify-deployment.sh"
+
+          (
+            cd "$bundle_root"
+            sha256sum \
+              docker-compose.prod.yml \
+              deploy/deploy.sh \
+              deploy/backup-db.sh \
+              deploy/validate-db-target.py \
+              deploy/verify-deployment.sh \
+              > BUNDLE.sha256
+            tar \
+              --sort=name \
+              --mtime='UTC 1970-01-01' \
+              --owner=0 \
+              --group=0 \
+              --numeric-owner \
+              -czf "$archive" \
+              BUNDLE.sha256 \
+              docker-compose.prod.yml \
+              deploy/deploy.sh \
+              deploy/backup-db.sh \
+              deploy/validate-db-target.py \
+              deploy/verify-deployment.sh
+          )
+          (
+            cd "$RUNNER_TEMP"
+            sha256sum "$(basename "$archive")" > "$(basename "$archive").sha256"
+          )
+
+      - name: Configure strict SSH trust
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
+          SSH_HOST: ${{ vars.PRODUCTION_HOST }}
+          SSH_PORT: ${{ vars.PRODUCTION_SSH_PORT }}
+        run: |
+          set -euo pipefail
+
+          [[ -n "$SSH_PRIVATE_KEY" ]] || { echo "missing production SSH key" >&2; exit 1; }
+          [[ -n "$SSH_KNOWN_HOSTS" ]] || { echo "missing pinned production host key" >&2; exit 1; }
+          [[ "$SSH_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]] || {
+            echo "invalid production SSH host" >&2
+            exit 1
+          }
+          if ! [[ "$SSH_PORT" =~ ^[0-9]{1,5}$ ]] || (( SSH_PORT < 1 || SSH_PORT > 65535 )); then
+            echo "invalid production SSH port" >&2
+            exit 1
+          fi
+
+          ssh_dir="$RUNNER_TEMP/superapp-production-ssh"
+          install -d -m 700 "$ssh_dir"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$ssh_dir/id_ed25519"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          chmod 600 "$ssh_dir/id_ed25519" "$ssh_dir/known_hosts"
+          ssh-keygen -y -f "$ssh_dir/id_ed25519" > /dev/null
+
+          lookup="$SSH_HOST"
+          if [[ "$SSH_PORT" != '22' ]]; then
+            lookup="[${SSH_HOST}]:${SSH_PORT}"
+          fi
+          ssh-keygen -F "$lookup" -f "$ssh_dir/known_hosts" > /dev/null || {
+            echo "known_hosts does not pin the configured host and port" >&2
+            exit 1
+          }
+
+      - name: Create remote staging directory
+        id: remote-stage
+        env:
+          SSH_HOST: ${{ vars.PRODUCTION_HOST }}
+          SSH_PORT: ${{ vars.PRODUCTION_SSH_PORT }}
+          SSH_USER: ${{ vars.PRODUCTION_SSH_USER }}
+        run: |
+          set -euo pipefail
+
+          [[ "$SSH_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]] || { echo "invalid SSH host" >&2; exit 1; }
+          [[ "$SSH_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || { echo "invalid SSH user" >&2; exit 1; }
+          [[ "$SSH_USER" != 'root' ]] || { echo "production SSH user must not be root" >&2; exit 1; }
+          if ! [[ "$SSH_PORT" =~ ^[0-9]{1,5}$ ]] || (( SSH_PORT < 1 || SSH_PORT > 65535 )); then
+            echo "invalid SSH port" >&2
+            exit 1
+          fi
+          ssh_dir="$RUNNER_TEMP/superapp-production-ssh"
+          remote_stage=$(
+            ssh \
+              -p "$SSH_PORT" \
+              -i "$ssh_dir/id_ed25519" \
+              -o BatchMode=yes \
+              -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+              -- "${SSH_USER}@${SSH_HOST}" \
+              'test "$(id -u)" -ne 0 || { echo "refusing remote staging as root" >&2; exit 1; }; umask 077; mktemp -d /tmp/superapp-deploy.XXXXXXXX'
+          )
+          [[ "$remote_stage" =~ ^/tmp/superapp-deploy\.[A-Za-z0-9]+$ ]] || {
+            echo "remote host returned an invalid staging path" >&2
+            exit 1
+          }
+          printf 'path=%s\n' "$remote_stage" >> "$GITHUB_OUTPUT"
+
+      - name: Transfer the exact-commit bundle
+        env:
+          SSH_HOST: ${{ vars.PRODUCTION_HOST }}
+          SSH_PORT: ${{ vars.PRODUCTION_SSH_PORT }}
+          SSH_USER: ${{ vars.PRODUCTION_SSH_USER }}
+          REMOTE_STAGE: ${{ steps.remote-stage.outputs.path }}
+        run: |
+          set -euo pipefail
+
+          [[ "$SSH_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]] || { echo "invalid SSH host" >&2; exit 1; }
+          [[ "$SSH_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || { echo "invalid SSH user" >&2; exit 1; }
+          if ! [[ "$SSH_PORT" =~ ^[0-9]{1,5}$ ]] || (( SSH_PORT < 1 || SSH_PORT > 65535 )); then
+            echo "invalid SSH port" >&2
+            exit 1
+          fi
+          [[ "$REMOTE_STAGE" =~ ^/tmp/superapp-deploy\.[A-Za-z0-9]+$ ]] || {
+            echo "invalid remote staging path" >&2
+            exit 1
+          }
+
+          ssh_dir="$RUNNER_TEMP/superapp-production-ssh"
+          scp \
+            -P "$SSH_PORT" \
+            -i "$ssh_dir/id_ed25519" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+            -- \
+            "$RUNNER_TEMP/superapp-deploy-bundle.tar.gz" \
+            "$RUNNER_TEMP/superapp-deploy-bundle.tar.gz.sha256" \
+            "${SSH_USER}@${SSH_HOST}:${REMOTE_STAGE}/"
+
+      - name: Install the exact release and prepare a durable deployment
+        id: remote-run
+        env:
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          SSH_HOST: ${{ vars.PRODUCTION_HOST }}
+          SSH_PORT: ${{ vars.PRODUCTION_SSH_PORT }}
+          SSH_USER: ${{ vars.PRODUCTION_SSH_USER }}
+          APP_PATH: ${{ vars.PRODUCTION_APP_PATH }}
+          API_URL: ${{ vars.PRODUCTION_API_URL }}
+          ADMIN_URL: ${{ vars.PRODUCTION_ADMIN_URL }}
+          REMOTE_STAGE: ${{ steps.remote-stage.outputs.path }}
+        run: |
+          set -euo pipefail
+
+          [[ "$SOURCE_SHA" =~ ^[0-9a-fA-F]{40}$ ]] || { echo "invalid source SHA" >&2; exit 1; }
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]] || { echo "invalid Actions run ID" >&2; exit 1; }
+          [[ "$RUN_ATTEMPT" =~ ^[0-9]+$ ]] || { echo "invalid Actions run attempt" >&2; exit 1; }
+          [[ "$SSH_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]] || { echo "invalid SSH host" >&2; exit 1; }
+          [[ "$SSH_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || { echo "invalid SSH user" >&2; exit 1; }
+          if ! [[ "$SSH_PORT" =~ ^[0-9]{1,5}$ ]] || (( SSH_PORT < 1 || SSH_PORT > 65535 )); then
+            echo "invalid SSH port" >&2
+            exit 1
+          fi
+          [[ "$APP_PATH" =~ ^/[A-Za-z0-9._/-]+$ ]] && [[ "$APP_PATH" != *..* ]] || {
+            echo "invalid application path" >&2
+            exit 1
+          }
+          case "$APP_PATH" in
+            / | */ | *//* | */./* | */. | \
+              /bin | /bin/* | /boot | /boot/* | /dev | /dev/* | /etc | /etc/* | \
+              /lib | /lib/* | /lib64 | /lib64/* | /proc | /proc/* | /root | /root/* | \
+              /run | /run/* | /sbin | /sbin/* | /sys | /sys/* | /tmp | /tmp/* | \
+              /usr | /usr/* | /home | /media | /mnt | /opt | /srv | /var)
+              echo "application path is a dangerous shared/system path" >&2
+              exit 1
+              ;;
+          esac
+          [[ "$API_URL" =~ ^https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?$ ]] || {
+            echo "production API URL must be an HTTPS origin without a path" >&2
+            exit 1
+          }
+          [[ "$ADMIN_URL" =~ ^https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?$ ]] || {
+            echo "production admin URL must be an HTTPS origin without a path" >&2
+            exit 1
+          }
+          [[ "$REMOTE_STAGE" =~ ^/tmp/superapp-deploy\.[A-Za-z0-9]+$ ]] || {
+            echo "invalid remote staging path" >&2
+            exit 1
+          }
+
+          source_sha="${SOURCE_SHA,,}"
+          source_sha_b64=$(printf '%s' "$source_sha" | base64 | tr -d '\n')
+          app_path_b64=$(printf '%s' "$APP_PATH" | base64 | tr -d '\n')
+          api_url_b64=$(printf '%s' "$API_URL" | base64 | tr -d '\n')
+          admin_url_b64=$(printf '%s' "$ADMIN_URL" | base64 | tr -d '\n')
+          remote_stage_b64=$(printf '%s' "$REMOTE_STAGE" | base64 | tr -d '\n')
+          run_id_b64=$(printf '%s' "$RUN_ID" | base64 | tr -d '\n')
+          run_attempt_b64=$(printf '%s' "$RUN_ATTEMPT" | base64 | tr -d '\n')
+          ssh_dir="$RUNNER_TEMP/superapp-production-ssh"
+
+          # All remote arguments are fixed-format or base64. GitHub values are
+          # never pasted into shell source, locally or on the server.
+          remote_run=$(
+            ssh \
+              -p "$SSH_PORT" \
+              -i "$ssh_dir/id_ed25519" \
+              -o BatchMode=yes \
+              -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+              -- "${SSH_USER}@${SSH_HOST}" \
+              "bash -s -- ${source_sha_b64} ${app_path_b64} ${api_url_b64} ${admin_url_b64} ${remote_stage_b64} ${run_id_b64} ${run_attempt_b64}" <<'REMOTE_SCRIPT'
+          set -euo pipefail
+          umask 077
+
+          source_sha=$(printf '%s' "$1" | base64 --decode)
+          app_path=$(printf '%s' "$2" | base64 --decode)
+          api_url=$(printf '%s' "$3" | base64 --decode)
+          admin_url=$(printf '%s' "$4" | base64 --decode)
+          remote_stage=$(printf '%s' "$5" | base64 --decode)
+          run_id=$(printf '%s' "$6" | base64 --decode)
+          run_attempt=$(printf '%s' "$7" | base64 --decode)
+
+          remote_uid=$(id -u)
+          [[ "$remote_uid" =~ ^[1-9][0-9]*$ ]] || {
+            echo "remote release installer must not run as root" >&2
+            exit 1
+          }
+          [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid source SHA" >&2; exit 1; }
+          [[ "$run_id" =~ ^[0-9]+$ ]] || { echo "invalid run ID" >&2; exit 1; }
+          [[ "$run_attempt" =~ ^[0-9]+$ ]] || { echo "invalid run attempt" >&2; exit 1; }
+          [[ "$app_path" =~ ^/[A-Za-z0-9._/-]+$ ]] && [[ "$app_path" != *..* ]] || {
+            echo "invalid remote path" >&2
+            exit 1
+          }
+          case "$app_path" in
+            / | */ | *//* | */./* | */. | \
+              /bin | /bin/* | /boot | /boot/* | /dev | /dev/* | /etc | /etc/* | \
+              /lib | /lib/* | /lib64 | /lib64/* | /proc | /proc/* | /root | /root/* | \
+              /run | /run/* | /sbin | /sbin/* | /sys | /sys/* | /tmp | /tmp/* | \
+              /usr | /usr/* | /home | /media | /mnt | /opt | /srv | /var)
+              echo "remote application path is a dangerous shared/system path" >&2
+              exit 1
+              ;;
+          esac
+          [[ "$api_url" =~ ^https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?$ ]] || {
+            echo "invalid remote API origin" >&2
+            exit 1
+          }
+          [[ "$admin_url" =~ ^https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?$ ]] || {
+            echo "invalid remote admin origin" >&2
+            exit 1
+          }
+          [[ "$remote_stage" =~ ^/tmp/superapp-deploy\.[A-Za-z0-9]+$ ]] || {
+            echo "invalid remote staging path" >&2
+            exit 1
+          }
+
+          archive="$remote_stage/superapp-deploy-bundle.tar.gz"
+          checksum="$remote_stage/superapp-deploy-bundle.tar.gz.sha256"
+          (cd "$remote_stage" && sha256sum -c "$(basename "$checksum")") >&2
+
+          expected_entries=$'BUNDLE.sha256\ndeploy/backup-db.sh\ndeploy/deploy.sh\ndeploy/validate-db-target.py\ndeploy/verify-deployment.sh\ndocker-compose.prod.yml'
+          actual_entries=$(tar -tzf "$archive" | LC_ALL=C sort)
+          [[ "$actual_entries" == "$expected_entries" ]] || {
+            echo "deployment bundle contains unexpected paths" >&2
+            exit 1
+          }
+
+          env_file="$app_path/.env.prod"
+          state_dir="$app_path/.deploy"
+          release_root="$app_path/.releases"
+          release_dir="$release_root/$source_sha"
+          [[ -e "$env_file" && -f "$env_file" && ! -L "$env_file" ]] || {
+            echo "production environment file must be a regular non-symlink file" >&2
+            exit 1
+          }
+          env_owner=$(stat -c '%u' "$env_file")
+          [[ "$env_owner" == "$remote_uid" ]] || {
+            echo "production environment file must be owned by the SSH user" >&2
+            exit 1
+          }
+          env_mode=$(stat -c '%a' "$env_file")
+          [[ "$env_mode" == '400' || "$env_mode" == '600' ]] || {
+            echo "production environment file mode must be 400 or 600" >&2
+            exit 1
+          }
+          if [[ -e "$state_dir" ]]; then
+            [[ -d "$state_dir" && ! -L "$state_dir" ]] || {
+              echo "deployment state path is not a real directory" >&2
+              exit 1
+            }
+          fi
+          if [[ -e "$release_root" ]]; then
+            [[ -d "$release_root" && ! -L "$release_root" ]] || {
+              echo "release root is not a real directory" >&2
+              exit 1
+            }
+          fi
+          install -d -m 700 "$state_dir" "$release_root"
+
+          incoming_manifest=$(tar -xOf "$archive" BUNDLE.sha256)
+          if [[ -e "$release_dir" ]]; then
+            [[ -d "$release_dir" && ! -L "$release_dir" ]] || {
+              echo "existing release path is not a directory" >&2
+              exit 1
+            }
+            [[ -f "$release_dir/BUNDLE.sha256" ]] || {
+              echo "existing release has no manifest" >&2
+              exit 1
+            }
+            [[ "$(< "$release_dir/BUNDLE.sha256")" == "$incoming_manifest" ]] || {
+              echo "existing release differs from the exact-commit bundle" >&2
+              exit 1
+            }
+            (cd "$release_dir" && sha256sum -c BUNDLE.sha256) >&2
+          else
+            temporary_release=$(mktemp -d "$release_root/.${source_sha}.XXXXXXXX")
+            trap 'rm -rf -- "$temporary_release"' EXIT
+            tar --no-same-owner -xzf "$archive" -C "$temporary_release"
+            (cd "$temporary_release" && sha256sum -c BUNDLE.sha256) >&2
+            chmod 500 "$temporary_release" "$temporary_release/deploy"
+            chmod 400 "$temporary_release/BUNDLE.sha256" "$temporary_release/docker-compose.prod.yml"
+            chmod 400 "$temporary_release/deploy/validate-db-target.py"
+            chmod 500 \
+              "$temporary_release/deploy/deploy.sh" \
+              "$temporary_release/deploy/backup-db.sh" \
+              "$temporary_release/deploy/verify-deployment.sh"
+            mv "$temporary_release" "$release_dir"
+            trap - EXIT
+          fi
+
+          runs_root="$state_dir/runs"
+          run_dir="$runs_root/${source_sha}-${run_id}-${run_attempt}"
+          install -d -m 700 "$runs_root"
+          [[ ! -e "$run_dir" ]] || {
+            echo "durable deployment run already exists" >&2
+            exit 1
+          }
+          install -d -m 700 "$run_dir"
+
+          runner="$run_dir/runner.sh"
+          cat > "$runner" <<'DURABLE_RUNNER'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          umask 077
+
+          run_dir="$1"
+          release_dir="$2"
+          state_dir="$3"
+          env_file="$4"
+          api_url="$5"
+          admin_url="$6"
+          deploy_tag="$7"
+          status_file="$run_dir/status"
+          heartbeat_file="$run_dir/heartbeat"
+          pid_file="$run_dir/pid"
+          heartbeat_pid=''
+          finalized=false
+
+          write_status() {
+            local state="$1"
+            local code="$2"
+            local temporary="${status_file}.tmp.$$"
+            printf '%s\t%s\t%s\n' "$state" "$code" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$temporary" &&
+              chmod 600 "$temporary" &&
+              mv -f -- "$temporary" "$status_file"
+          }
+
+          write_heartbeat() {
+            local temporary="${heartbeat_file}.tmp.${BASHPID}"
+            printf '%s\n' "$(date -u +%s)" > "$temporary" &&
+              chmod 600 "$temporary" &&
+              mv -f -- "$temporary" "$heartbeat_file"
+          }
+
+          heartbeat_loop() {
+            while :; do
+              write_heartbeat || exit 125
+              sleep 10
+            done
+          }
+
+          # Invoked indirectly by the EXIT trap.
+          # shellcheck disable=SC2329
+          finish_unexpected() {
+            local code=$?
+            if [[ -n "$heartbeat_pid" ]]; then
+              kill "$heartbeat_pid" 2>/dev/null || true
+              wait "$heartbeat_pid" 2>/dev/null || true
+            fi
+            if ! $finalized; then
+              write_status failure "$code" ||
+                printf 'fatal: could not persist deployment failure status\n' >&2
+            fi
+          }
+          trap finish_unexpected EXIT
+
+          # Persist our own PID before announcing running. The SSH launcher also
+          # writes the same PID, but this copy survives a connection loss after
+          # nohup forked and before the parent shell completed its handshake.
+          pid_tmp="${pid_file}.tmp.$$"
+          printf '%s\n' "$$" > "$pid_tmp"
+          chmod 600 "$pid_tmp"
+          mv -f -- "$pid_tmp" "$pid_file"
+          write_status running '-' || exit 125
+          write_heartbeat || exit 125
+          heartbeat_loop &
+          heartbeat_pid=$!
+          DEPLOY_STATE_DIR="$state_dir" "$release_dir/deploy/deploy.sh" \
+            --env "$env_file" \
+            --expected-stack prod \
+            --api-url "$api_url" \
+            --admin-url "$admin_url" \
+            "$deploy_tag"
+          code=$?
+          state=failure
+          if [[ "$code" -eq 0 ]]; then
+            state=success
+          fi
+          write_status "$state" "$code" || exit 125
+          finalized=true
+          exit "$code"
+          DURABLE_RUNNER
+          chmod 500 "$runner"
+
+          status_tmp="$run_dir/.status.$$"
+          printf 'queued\t-\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$status_tmp"
+          chmod 600 "$status_tmp"
+          mv -f -- "$status_tmp" "$run_dir/status"
+
+          printf '%s\n' "$run_dir"
+          REMOTE_SCRIPT
+          )
+
+          expected_run="${APP_PATH}/.deploy/runs/${source_sha}-${RUN_ID}-${RUN_ATTEMPT}"
+          [[ "$remote_run" == "$expected_run" ]] || {
+            echo "remote host returned an unexpected durable run path" >&2
+            exit 1
+          }
+          printf 'path=%s\n' "$remote_run" >> "$GITHUB_OUTPUT"
+
+      # Re-check main immediately before the small SSH launcher. All expensive
+      # extraction and verification happened above, so the remaining race
+      # window is limited to opening one strict SSH connection.
+      - name: Reconfirm freshness and start the durable deployment
+        id: launch
+        # SSH can disconnect after nohup forked but before returning `started`.
+        # The next always-run reconciliation step is the authority on success.
+        continue-on-error: true
+        env:
+          GITHUB_API_ENDPOINT: ${{ github.api_url }}
+          GITHUB_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          SSH_HOST: ${{ vars.PRODUCTION_HOST }}
+          SSH_PORT: ${{ vars.PRODUCTION_SSH_PORT }}
+          SSH_USER: ${{ vars.PRODUCTION_SSH_USER }}
+          APP_PATH: ${{ vars.PRODUCTION_APP_PATH }}
+          PUBLIC_API_URL: ${{ vars.PRODUCTION_API_URL }}
+          PUBLIC_ADMIN_URL: ${{ vars.PRODUCTION_ADMIN_URL }}
+          REMOTE_RUN: ${{ steps.remote-run.outputs.path }}
+        run: |
+          set -euo pipefail
+
+          [[ "$GITHUB_API_ENDPOINT" == https://* ]] || exit 1
+          [[ "$REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || exit 1
+          [[ "$SOURCE_SHA" =~ ^[0-9a-fA-F]{40}$ ]] || exit 1
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]] || exit 1
+          [[ "$RUN_ATTEMPT" =~ ^[0-9]+$ ]] || exit 1
+          [[ "$SSH_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]] || exit 1
+          [[ "$SSH_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || exit 1
+          if ! [[ "$SSH_PORT" =~ ^[0-9]{1,5}$ ]] || (( SSH_PORT < 1 || SSH_PORT > 65535 )); then
+            exit 1
+          fi
+          [[ "$APP_PATH" =~ ^/[A-Za-z0-9._/-]+$ ]] && [[ "$APP_PATH" != *..* ]] || exit 1
+          [[ "$PUBLIC_API_URL" =~ ^https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?$ ]] || exit 1
+          [[ "$PUBLIC_ADMIN_URL" =~ ^https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?$ ]] || exit 1
+
+          source_sha="${SOURCE_SHA,,}"
+          expected_run="${APP_PATH}/.deploy/runs/${source_sha}-${RUN_ID}-${RUN_ATTEMPT}"
+          [[ "$REMOTE_RUN" == "$expected_run" ]] || exit 1
+          run_b64=$(printf '%s' "$REMOTE_RUN" | base64 | tr -d '\n')
+          source_b64=$(printf '%s' "$source_sha" | base64 | tr -d '\n')
+          app_b64=$(printf '%s' "$APP_PATH" | base64 | tr -d '\n')
+          api_b64=$(printf '%s' "$PUBLIC_API_URL" | base64 | tr -d '\n')
+          admin_b64=$(printf '%s' "$PUBLIC_ADMIN_URL" | base64 | tr -d '\n')
+          run_id_b64=$(printf '%s' "$RUN_ID" | base64 | tr -d '\n')
+          attempt_b64=$(printf '%s' "$RUN_ATTEMPT" | base64 | tr -d '\n')
+          ssh_dir="$RUNNER_TEMP/superapp-production-ssh"
+
+          main_sha=$(
+            curl \
+              -q \
+              --fail \
+              --silent \
+              --show-error \
+              --retry 3 \
+              --retry-all-errors \
+              --connect-timeout 10 \
+              --max-time 30 \
+              -H 'Accept: application/vnd.github+json' \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "${GITHUB_API_ENDPOINT%/}/repos/${REPOSITORY}/git/ref/heads/main" |
+              jq -er '.object.sha'
+          )
+          [[ "$main_sha" =~ ^[0-9a-fA-F]{40}$ ]] || exit 1
+          [[ "${main_sha,,}" == "$source_sha" ]] || {
+            echo "deployment superseded: source is no longer the main branch HEAD" >&2
+            exit 1
+          }
+
+          launched=$(
+            ssh \
+              -p "$SSH_PORT" \
+              -i "$ssh_dir/id_ed25519" \
+              -o BatchMode=yes \
+              -o ConnectTimeout=10 \
+              -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+              -- "${SSH_USER}@${SSH_HOST}" \
+              "bash -s -- ${run_b64} ${source_b64} ${app_b64} ${api_b64} ${admin_b64} ${run_id_b64} ${attempt_b64}" <<'LAUNCH_SCRIPT'
+          set -euo pipefail
+          umask 077
+
+          run_dir=$(printf '%s' "$1" | base64 --decode)
+          source_sha=$(printf '%s' "$2" | base64 --decode)
+          app_path=$(printf '%s' "$3" | base64 --decode)
+          api_url=$(printf '%s' "$4" | base64 --decode)
+          admin_url=$(printf '%s' "$5" | base64 --decode)
+          run_id=$(printf '%s' "$6" | base64 --decode)
+          run_attempt=$(printf '%s' "$7" | base64 --decode)
+
+          remote_uid=$(id -u)
+          [[ "$remote_uid" =~ ^[1-9][0-9]*$ ]] || exit 1
+          [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          [[ "$run_id" =~ ^[0-9]+$ ]] || exit 1
+          [[ "$run_attempt" =~ ^[0-9]+$ ]] || exit 1
+          [[ "$app_path" =~ ^/[A-Za-z0-9._/-]+$ ]] && [[ "$app_path" != *..* ]] || exit 1
+          case "$app_path" in
+            / | */ | *//* | */./* | */. | \
+              /bin | /bin/* | /boot | /boot/* | /dev | /dev/* | /etc | /etc/* | \
+              /lib | /lib/* | /lib64 | /lib64/* | /proc | /proc/* | /root | /root/* | \
+              /run | /run/* | /sbin | /sbin/* | /sys | /sys/* | /tmp | /tmp/* | \
+              /usr | /usr/* | /home | /media | /mnt | /opt | /srv | /var) exit 1 ;;
+          esac
+          [[ "$api_url" =~ ^https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?$ ]] || exit 1
+          [[ "$admin_url" =~ ^https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?$ ]] || exit 1
+          expected_run="$app_path/.deploy/runs/${source_sha}-${run_id}-${run_attempt}"
+          [[ "$run_dir" == "$expected_run" ]] || exit 1
+          [[ -d "$run_dir" && ! -L "$run_dir" ]] || exit 1
+
+          state_dir="$app_path/.deploy"
+          release_dir="$app_path/.releases/$source_sha"
+          env_file="$app_path/.env.prod"
+          deploy_tag="sha-${source_sha}"
+          runner="$run_dir/runner.sh"
+          status_file="$run_dir/status"
+          heartbeat_file="$run_dir/heartbeat"
+          launch_marker="$run_dir/launch-attempt"
+          [[ -d "$state_dir" && ! -L "$state_dir" ]] || exit 1
+          [[ -d "$release_dir" && ! -L "$release_dir" ]] || exit 1
+          [[ -f "$release_dir/BUNDLE.sha256" && ! -L "$release_dir/BUNDLE.sha256" ]] || exit 1
+          (cd "$release_dir" && sha256sum -c BUNDLE.sha256) > /dev/null
+          [[ -f "$runner" && ! -L "$runner" && -x "$runner" ]] || exit 1
+          [[ -f "$status_file" && ! -L "$status_file" ]] || exit 1
+          [[ ! -e "$run_dir/pid" && ! -e "$run_dir/deploy.log" && ! -e "$launch_marker" ]] || exit 1
+
+          [[ -e "$env_file" && -f "$env_file" && ! -L "$env_file" ]] || exit 1
+          [[ "$(stat -c '%u' "$env_file")" == "$remote_uid" ]] || exit 1
+          env_mode=$(stat -c '%a' "$env_file")
+          [[ "$env_mode" == '400' || "$env_mode" == '600' ]] || exit 1
+          IFS=$'\t' read -r state code timestamp extra < "$status_file"
+          [[ "$state" == 'queued' && "$code" == '-' && -n "$timestamp" && -z "${extra:-}" ]] || exit 1
+
+          marker_tmp="$run_dir/.launch-attempt.$$"
+          printf '%s\n' "$(date -u +%s)" > "$marker_tmp"
+          chmod 600 "$marker_tmp"
+          mv -f -- "$marker_tmp" "$launch_marker"
+          nohup "$runner" \
+            "$run_dir" \
+            "$release_dir" \
+            "$state_dir" \
+            "$env_file" \
+            "$api_url" \
+            "$admin_url" \
+            "$deploy_tag" \
+            > "$run_dir/deploy.log" 2>&1 < /dev/null &
+          deploy_pid=$!
+          pid_tmp="$run_dir/.pid.$$"
+          printf '%s\n' "$deploy_pid" > "$pid_tmp"
+          chmod 600 "$pid_tmp"
+          mv -f -- "$pid_tmp" "$run_dir/pid"
+
+          process_matches_run() {
+            local process_state argument
+            local saw_runner=false
+            local saw_run_dir=false
+            local arguments=()
+
+            kill -0 "$deploy_pid" 2>/dev/null || return 1
+            [[ -r "/proc/${deploy_pid}/stat" && -r "/proc/${deploy_pid}/cmdline" ]] || return 1
+            process_state=$(awk '{print $3}' "/proc/${deploy_pid}/stat") || return 1
+            [[ "$process_state" != 'Z' && "$process_state" != 'X' ]] || return 1
+            mapfile -d '' -t arguments < "/proc/${deploy_pid}/cmdline" || return 1
+            for argument in "${arguments[@]}"; do
+              [[ "$argument" == "$runner" ]] && saw_runner=true
+              [[ "$argument" == "$run_dir" ]] && saw_run_dir=true
+            done
+            $saw_runner && $saw_run_dir
+          }
+
+          heartbeat_is_fresh() {
+            local heartbeat now
+            [[ -f "$heartbeat_file" && ! -L "$heartbeat_file" ]] || return 1
+            heartbeat=$(< "$heartbeat_file")
+            [[ "$heartbeat" =~ ^[0-9]{10,}$ ]] || return 1
+            now=$(date -u +%s)
+            (( heartbeat <= now + 5 && now - heartbeat <= 30 ))
+          }
+
+          handshake=false
+          for _ in $(seq 1 15); do
+            IFS=$'\t' read -r state code timestamp extra < "$status_file"
+            [[ -z "${extra:-}" ]] || exit 1
+            case "$state" in
+              running)
+                if process_matches_run && heartbeat_is_fresh; then
+                  handshake=true
+                  break
+                fi
+                ;;
+              success | failure)
+                handshake=true
+                break
+                ;;
+              queued) ;;
+              *) exit 1 ;;
+            esac
+            sleep 1
+          done
+
+          if ! $handshake; then
+            # Avoid racing a final status written between the last read and the
+            # liveness check. If the wrapper is gone or its PID was reused,
+            # persist a terminal failure for the normal poller to report.
+            IFS=$'\t' read -r state code timestamp extra < "$status_file"
+            [[ -z "${extra:-}" ]] || exit 1
+            if [[ "$state" == 'success' || "$state" == 'failure' ]]; then
+              handshake=true
+            elif ! process_matches_run; then
+              failed_tmp="$run_dir/.status-launcher.$$"
+              printf 'failure\t125\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$failed_tmp" &&
+                chmod 600 "$failed_tmp" &&
+                mv -f -- "$failed_tmp" "$status_file" || exit 125
+              handshake=true
+            fi
+          fi
+          $handshake || {
+            echo "durable runner did not enter running state within 15 seconds" >&2
+            exit 1
+          }
+
+          printf 'started\n'
+          LAUNCH_SCRIPT
+          )
+          [[ "$launched" == 'started' ]] || {
+            echo "remote host did not confirm the durable launcher" >&2
+            exit 1
+          }
+
+      - name: Wait for the durable deployment result
+        if: always() && steps.remote-run.outputs.path != ''
+        env:
+          LAUNCH_OUTCOME: ${{ steps.launch.outcome }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          SSH_HOST: ${{ vars.PRODUCTION_HOST }}
+          SSH_PORT: ${{ vars.PRODUCTION_SSH_PORT }}
+          SSH_USER: ${{ vars.PRODUCTION_SSH_USER }}
+          APP_PATH: ${{ vars.PRODUCTION_APP_PATH }}
+          REMOTE_RUN: ${{ steps.remote-run.outputs.path }}
+        run: |
+          set -euo pipefail
+
+          [[ "$SOURCE_SHA" =~ ^[0-9a-fA-F]{40}$ ]] || exit 1
+          [[ "$LAUNCH_OUTCOME" == 'success' || "$LAUNCH_OUTCOME" == 'failure' ]] || exit 1
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]] || exit 1
+          [[ "$RUN_ATTEMPT" =~ ^[0-9]+$ ]] || exit 1
+          [[ "$SSH_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]] || exit 1
+          [[ "$SSH_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || exit 1
+          if ! [[ "$SSH_PORT" =~ ^[0-9]{1,5}$ ]] || (( SSH_PORT < 1 || SSH_PORT > 65535 )); then
+            exit 1
+          fi
+          [[ "$APP_PATH" =~ ^/[A-Za-z0-9._/-]+$ ]] && [[ "$APP_PATH" != *..* ]] || exit 1
+
+          source_sha="${SOURCE_SHA,,}"
+          expected_run="${APP_PATH}/.deploy/runs/${source_sha}-${RUN_ID}-${RUN_ATTEMPT}"
+          [[ "$REMOTE_RUN" == "$expected_run" ]] || {
+            echo "invalid durable run path" >&2
+            exit 1
+          }
+          run_b64=$(printf '%s' "$REMOTE_RUN" | base64 | tr -d '\n')
+          ssh_dir="$RUNNER_TEMP/superapp-production-ssh"
+          transient_errors=0
+          poll=0
+          stale_heartbeat_polls=0
+          deadline=$((SECONDS + 4500))
+
+          # Use a wall-clock deadline, so repeated SSH connection timeouts do
+          # not silently stretch the poll past the 90-minute job timeout.
+          while (( SECONDS < deadline )); do
+            poll=$((poll + 1))
+            if status_line=$(
+              ssh \
+                -p "$SSH_PORT" \
+                -i "$ssh_dir/id_ed25519" \
+                -o BatchMode=yes \
+                -o ConnectTimeout=10 \
+                -o IdentitiesOnly=yes \
+                -o StrictHostKeyChecking=yes \
+                -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+                -- "${SSH_USER}@${SSH_HOST}" \
+                "bash -s -- ${run_b64}" 2>/dev/null <<'POLL_SCRIPT'
+          set -euo pipefail
+          run_dir=$(printf '%s' "$1" | base64 --decode)
+          [[ "$run_dir" = /* && "$run_dir" != *$'\n'* && "$run_dir" != *$'\r'* ]] || exit 1
+          [[ -d "$run_dir" && ! -L "$run_dir" ]] || exit 1
+          status_file="$run_dir/status"
+          pid_file="$run_dir/pid"
+          runner="$run_dir/runner.sh"
+          heartbeat_file="$run_dir/heartbeat"
+          launch_marker="$run_dir/launch-attempt"
+          [[ -f "$status_file" && ! -L "$status_file" ]] || exit 1
+
+          load_status() {
+            local status_line
+            status_line=$(< "$status_file")
+            [[ "$status_line" != *$'\n'* && "$status_line" != *$'\r'* ]] || return 1
+            IFS=$'\t' read -r state exit_code timestamp extra <<< "$status_line"
+            [[ -z "${extra:-}" && -n "$timestamp" ]] || return 1
+            case "$state" in
+              queued | running) [[ "$exit_code" == '-' ]] ;;
+              success) [[ "$exit_code" == '0' ]] ;;
+              failure) [[ "$exit_code" =~ ^[0-9]+$ ]] ;;
+              *) return 1 ;;
+            esac
+          }
+
+          process_matches_run() {
+            local pid process_state argument
+            local saw_runner=false
+            local saw_run_dir=false
+            local arguments=()
+
+            [[ -f "$pid_file" && ! -L "$pid_file" ]] || return 1
+            pid=$(< "$pid_file")
+            [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+            kill -0 "$pid" 2>/dev/null || return 1
+            [[ -r "/proc/${pid}/stat" && -r "/proc/${pid}/cmdline" ]] || return 1
+            process_state=$(awk '{print $3}' "/proc/${pid}/stat") || return 1
+            [[ "$process_state" != 'Z' && "$process_state" != 'X' ]] || return 1
+            mapfile -d '' -t arguments < "/proc/${pid}/cmdline" || return 1
+            for argument in "${arguments[@]}"; do
+              [[ "$argument" == "$runner" ]] && saw_runner=true
+              [[ "$argument" == "$run_dir" ]] && saw_run_dir=true
+            done
+            $saw_runner && $saw_run_dir
+          }
+
+          heartbeat_is_fresh() {
+            local heartbeat now
+            [[ -f "$heartbeat_file" && ! -L "$heartbeat_file" ]] || return 1
+            heartbeat=$(< "$heartbeat_file")
+            [[ "$heartbeat" =~ ^[0-9]{10,}$ ]] || return 1
+            now=$(date -u +%s)
+            (( heartbeat <= now + 5 && now - heartbeat <= 45 ))
+          }
+
+          launch_grace_is_active() {
+            local attempted now
+            [[ -f "$launch_marker" && ! -L "$launch_marker" ]] || return 1
+            attempted=$(< "$launch_marker")
+            [[ "$attempted" =~ ^[0-9]{10,}$ ]] || return 1
+            now=$(date -u +%s)
+            (( attempted <= now + 5 && now - attempted <= 30 ))
+          }
+
+          load_status
+          if [[ "$state" == 'queued' || "$state" == 'running' ]] && ! process_matches_run; then
+            # The wrapper can write a final status just before it exits. Reload
+            # after proving its PID is dead/reused so that final success wins.
+            load_status
+            if [[ "$state" == 'queued' || "$state" == 'running' ]] && launch_grace_is_active; then
+              # The launcher may have written its durable-attempt marker and
+              # forked just before SSH dropped. Give runner.sh a bounded window
+              # to self-persist its PID/status before declaring a pre-fork loss.
+              :
+            elif [[ "$state" == 'queued' || "$state" == 'running' ]]; then
+              failed_tmp="$run_dir/.status-poller.$$"
+              printf 'failure\t125\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$failed_tmp" &&
+                chmod 600 "$failed_tmp" &&
+                mv -f -- "$failed_tmp" "$status_file" || exit 125
+              load_status
+            fi
+          fi
+          if [[ "$state" == 'running' ]] && process_matches_run && ! heartbeat_is_fresh; then
+            # PID and cmdline still prove this exact durable runner is alive.
+            # A stale heartbeat is therefore an observation, not a terminal
+            # result: keep reconciling until status is terminal, PID dies, or
+            # the bounded overall deadline expires.
+            printf 'running-stale\t-\t%s\n' "$timestamp"
+            exit 0
+          fi
+          printf '%s\t%s\t%s\n' "$state" "$exit_code" "$timestamp"
+          POLL_SCRIPT
+            ); then
+              transient_errors=0
+            else
+              transient_errors=$((transient_errors + 1))
+              if (( transient_errors == 1 || transient_errors % 6 == 0 )); then
+                echo "transient SSH poll failure (${transient_errors} consecutive); remote deployment continues" >&2
+              fi
+              sleep 10
+              continue
+            fi
+
+            IFS=$'\t' read -r state exit_code timestamp extra <<< "$status_line"
+            [[ -z "${extra:-}" ]] || { echo "invalid remote status" >&2; exit 1; }
+            case "$state" in
+              queued | running)
+                stale_heartbeat_polls=0
+                if (( poll == 1 || poll % 6 == 0 )); then
+                  echo "remote deployment: ${state} (${timestamp})"
+                fi
+                ;;
+              running-stale)
+                [[ "$exit_code" == '-' ]] || { echo "invalid stale-heartbeat status" >&2; exit 1; }
+                stale_heartbeat_polls=$((stale_heartbeat_polls + 1))
+                if (( stale_heartbeat_polls == 1 || stale_heartbeat_polls % 6 == 0 )); then
+                  echo "::warning::remote deployment heartbeat is stale, but its verified PID/cmdline is alive; continuing reconciliation"
+                fi
+                ;;
+              success)
+                [[ "$exit_code" == '0' ]] || { echo "invalid success status" >&2; exit 1; }
+                echo "remote deployment succeeded (${timestamp}); log: ${REMOTE_RUN}/deploy.log"
+                exit 0
+                ;;
+              failure)
+                [[ "$exit_code" =~ ^[0-9]+$ ]] || { echo "invalid failure status" >&2; exit 1; }
+                echo "remote deployment failed with exit ${exit_code}; log preserved at ${REMOTE_RUN}/deploy.log" >&2
+                exit 1
+                ;;
+              *)
+                echo "invalid remote deployment state" >&2
+                exit 1
+                ;;
+            esac
+            sleep 10
+          done
+
+          echo "poll timeout; the durable remote deployment continues at ${REMOTE_RUN}" >&2
+          exit 1
+
+      - name: Remove remote staging bundle
+        if: always()
+        # Cleanup is best-effort. The durable result step above is the sole
+        # authority for the production environment outcome.
+        continue-on-error: true
+        env:
+          SSH_HOST: ${{ vars.PRODUCTION_HOST }}
+          SSH_PORT: ${{ vars.PRODUCTION_SSH_PORT }}
+          SSH_USER: ${{ vars.PRODUCTION_SSH_USER }}
+          REMOTE_STAGE: ${{ steps.remote-stage.outputs.path }}
+        run: |
+          set -euo pipefail
+
+          [[ -n "$REMOTE_STAGE" ]] || exit 0
+          warn_cleanup() {
+            echo "::warning::$1; the verified deployment result remains authoritative"
+            exit 0
+          }
+          [[ "$SSH_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]] || warn_cleanup "invalid cleanup SSH host"
+          [[ "$SSH_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || warn_cleanup "invalid cleanup SSH user"
+          [[ "$SSH_PORT" =~ ^[0-9]{1,5}$ ]] || warn_cleanup "invalid cleanup SSH port"
+          [[ "$REMOTE_STAGE" =~ ^/tmp/superapp-deploy\.[A-Za-z0-9]+$ ]] || warn_cleanup "invalid remote staging cleanup path"
+          stage_b64=$(printf '%s' "$REMOTE_STAGE" | base64 | tr -d '\n')
+          ssh_dir="$RUNNER_TEMP/superapp-production-ssh"
+
+          if ! ssh \
+            -p "$SSH_PORT" \
+            -i "$ssh_dir/id_ed25519" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+            -- "${SSH_USER}@${SSH_HOST}" \
+            "bash -s -- ${stage_b64}" <<'CLEANUP_SCRIPT'
+          set -euo pipefail
+          stage=$(printf '%s' "$1" | base64 --decode)
+          [[ "$stage" =~ ^/tmp/superapp-deploy\.[A-Za-z0-9]+$ ]] || exit 1
+          rm -rf -- "$stage"
+          CLEANUP_SCRIPT
+          then
+            warn_cleanup "remote staging cleanup failed"
+          fi
+
+      - name: Remove ephemeral deployment material
+        if: always()
+        # A hosted-runner filesystem cleanup cannot change an already verified
+        # production result. The runner is ephemeral; failures remain warnings.
+        continue-on-error: true
+        run: |
+          cleanup_failed=false
+          if ! rm -rf -- "$RUNNER_TEMP/superapp-deploy-bundle"; then
+            cleanup_failed=true
+          fi
+          if ! rm -f -- \
+            "$RUNNER_TEMP/superapp-deploy-bundle.tar.gz" \
+            "$RUNNER_TEMP/superapp-deploy-bundle.tar.gz.sha256" \
+            "$RUNNER_TEMP/superapp-production-ssh/id_ed25519" \
+            "$RUNNER_TEMP/superapp-production-ssh/known_hosts"; then
+            cleanup_failed=true
+          fi
+          if $cleanup_failed; then
+            echo "::warning::ephemeral runner cleanup failed; the verified deployment result remains authoritative"
+          fi

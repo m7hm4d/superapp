@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -94,12 +97,21 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The formatter compares the complete PR/push range, not just the
+          # single commit checked out by default.
+          fetch-depth: 0
 
       # قبل التنصيب: لا يحتاج شيئاً وينتهي في أقل من ثانية. تعبير GitHub
       # داخل run: يُلصق نصّاً في السكربت قبل تشغيله، واسم الوسم يختاره من
       # يستطيع إنشاء وسم — فحص ساكن أوثق من الانتباه في كل مراجعة.
-      - name: Check workflows for expression injection
-        run: python3 scripts/check-workflow-injection.py
+      - name: Check workflow security invariants
+        run: |
+          python3 scripts/check-workflow-injection.py
+          python3 scripts/check-trivy-workflow-policy.py
+          python3 scripts/check-registry-tag.py --self-test
+          python3 scripts/check-registry-tag.py --check-workflow .github/workflows/publish.yml
+          python3 scripts/check-deploy-workflow-policy.py
 
       # حدود الوحدات: لكل جدول وحدة تملكه. القائمة تبدأ بالخروق القائمة
       # فتمرّ اليوم، وتُفرَّغ لا تُملأ — والفحص يسقط على أي خرق جديد.
@@ -117,6 +129,71 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # The repository predates the formatter and still contains legacy files
+      # that are not Prettier-clean. Gate only files changed by this PR/push so
+      # unrelated work is not blocked, while every newly touched source/config
+      # file is clean. Generated dependency lockfiles retain their package
+      # manager's canonical format and are intentionally excluded.
+      # Filenames stay NUL-delimited and are passed as an argv array: a filename
+      # can never become shell syntax.
+      - name: Prettier (changed files only)
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          valid_sha() { [[ "$1" =~ ^[0-9a-fA-F]{40}$ ]]; }
+
+          case "$EVENT_NAME" in
+            pull_request)
+              if ! valid_sha "$PR_BASE_SHA" || ! valid_sha "$PR_HEAD_SHA"; then
+                echo "invalid pull request commit SHA" >&2
+                exit 1
+              fi
+              range="${PR_BASE_SHA}...${PR_HEAD_SHA}"
+              ;;
+            push)
+              valid_sha "$CURRENT_SHA" || {
+                echo "invalid push commit SHA" >&2
+                exit 1
+              }
+              if valid_sha "$BEFORE_SHA" && [[ ! "$BEFORE_SHA" =~ ^0+$ ]]; then
+                range="${BEFORE_SHA}..${CURRENT_SHA}"
+              else
+                empty_tree=$(git hash-object -t tree /dev/null)
+                range="${empty_tree}..${CURRENT_SHA}"
+              fi
+              ;;
+            *)
+              echo "unsupported event: $EVENT_NAME" >&2
+              exit 1
+              ;;
+          esac
+
+          changed_file=$(mktemp "$RUNNER_TEMP/prettier-changed.XXXXXXXX")
+          trap 'rm -f -- "$changed_file"' EXIT
+          git diff --name-only --diff-filter=ACMR -z "$range" -- > "$changed_file"
+          mapfile -d '' candidates < "$changed_file"
+          changed=()
+          for file in "${candidates[@]}"; do
+            case "$file" in
+              pnpm-lock.yaml | package-lock.json | yarn.lock | */pubspec.lock) ;;
+              *) changed+=("$file") ;;
+            esac
+          done
+
+          if (( ${#changed[@]} == 0 )); then
+            echo "No changed files to format-check."
+            exit 0
+          fi
+
+          printf 'Checking %d changed file(s) with Prettier.\n' "${#changed[@]}"
+          pnpm exec prettier --check --ignore-unknown -- "${changed[@]}"
 
       - name: Lint
         run: pnpm run lint
@@ -187,6 +264,16 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: ShellCheck deployment scripts
+        run: |
+          shellcheck --version
+          shellcheck deploy/*.sh
+
+      # Fast static regressions for immutable tags, parser injection, backup
+      # ordering, rollback hooks, and the Compose hardening invariants.
+      - name: Deployment safety regression tests
+        run: bash deploy/test-deployment-safety.sh
+
       # أسرار وهمية: هذا الـjob يتحقق من صحة التركيب لا من قيم الإنتاج
       - name: Materialise a throwaway .env.prod
         run: |
@@ -198,6 +285,7 @@ jobs:
               -e 's|^API_IMAGE=.*|API_IMAGE=superapp-api:latest|' \
               -e 's|^ADMIN_IMAGE=.*|ADMIN_IMAGE=superapp-admin:latest|' \
               .env.prod.example > .env.prod
+          chmod 600 .env.prod
 
       # شبكة حافة **لكل حزمة** لا واحدة مشتركة: بشبكة واحدة تصل حاوية
       # التجربة مباشرة إلى prod-api بلا مرور بـCaddy. الاسم يتبع STACK_NAME،
@@ -271,7 +359,7 @@ jobs:
           test "$state" = "exited 0" || { echo "migrate: $state"; exit 1; }
 
           echo "--- wait for api and admin to report healthy ---"
-          for i in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             healthy=$(docker compose -f docker-compose.prod.yml --env-file .env.prod ps \
               --format '{{.Service}} {{.Health}}' | grep -c 'healthy' || true)
             [ "$healthy" -ge 3 ] && break
@@ -303,10 +391,13 @@ jobs:
           sed -e 's|^STACK_NAME=.*|STACK_NAME=stage|' \
               -e 's|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=stage-only-password|' \
               -e 's|^DATABASE_URL=.*|DATABASE_URL=postgres://superapp:stage-only-password@db:5432/superapp|' \
+              -e 's|^API_IMAGE=.*|API_IMAGE=ghcr.io/m7hm4d/superapp-api@sha256:0000000000000000000000000000000000000000000000000000000000000000|' \
+              -e 's|^ADMIN_IMAGE=.*|ADMIN_IMAGE=ghcr.io/m7hm4d/superapp-admin@sha256:0000000000000000000000000000000000000000000000000000000000000000|' \
               .env.prod > .env.stage
+          chmod 600 .env.stage
 
           # ١) الأمر الناسي لـENV_FILE يجب أن **يسقط**، لا أن يلتقط .env.prod
-          if ENV_FILE= docker compose -f docker-compose.prod.yml --env-file .env.stage config >/dev/null 2>&1; then
+          if ENV_FILE='' docker compose -f docker-compose.prod.yml --env-file .env.stage config >/dev/null 2>&1; then
             echo "compose resolved without ENV_FILE — the silent default is back"
             exit 1
           fi
@@ -339,10 +430,24 @@ jobs:
       # يسقط على CRITICAL و HIGH القابلة للإصلاح فقط. ثغرة بلا رقعة متاحة
       # تُبلَّغ ولا توقف الدمج — لا يملك أحد إصلاحها اليوم، وحاجزٌ لا يمكن
       # تجاوزه يُتعلَّم تجاهله.
+      - name: Create trusted Trivy policy
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '{}\n' > "$RUNNER_TEMP/trivy-blocking.yaml"
+          printf '%s\n' \
+            'vulnerabilities: []' \
+            'misconfigurations: []' \
+            'secrets: []' \
+            'licenses: []' \
+            > "$RUNNER_TEMP/trivy-empty-ignore.yaml"
+
       - name: Scan images for vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: superapp-api:latest
+          trivy-config: ${{ runner.temp }}/trivy-blocking.yaml
+          trivyignores: ${{ runner.temp }}/trivy-empty-ignore.yaml
           format: table
           severity: CRITICAL,HIGH
           ignore-unfixed: true
@@ -352,6 +457,8 @@ jobs:
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: superapp-admin:latest
+          trivy-config: ${{ runner.temp }}/trivy-blocking.yaml
+          trivyignores: ${{ runner.temp }}/trivy-empty-ignore.yaml
           format: table
           severity: CRITICAL,HIGH
           ignore-unfixed: true
@@ -369,6 +476,8 @@ jobs:
         with:
           scan-type: image
           image-ref: superapp-api:latest
+          trivy-config: ${{ runner.temp }}/trivy-blocking.yaml
+          trivyignores: ${{ runner.temp }}/trivy-empty-ignore.yaml
           format: spdx-json
           output: sbom/superapp-api.spdx.json
 
@@ -377,6 +486,8 @@ jobs:
         with:
           scan-type: image
           image-ref: superapp-admin:latest
+          trivy-config: ${{ runner.temp }}/trivy-blocking.yaml
+          trivyignores: ${{ runner.temp }}/trivy-empty-ignore.yaml
           format: spdx-json
           output: sbom/superapp-admin.spdx.json
 

@@ -1,0 +1,134 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '30 3 * * 6'
+  workflow_dispatch:
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  repository:
+    name: Repository vulnerabilities and IaC
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Create trusted Trivy policy
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '{}\n' > "$RUNNER_TEMP/trivy-blocking.yaml"
+          printf '%s\n' \
+            'vulnerabilities: []' \
+            'misconfigurations: []' \
+            'secrets: []' \
+            'licenses: []' \
+            > "$RUNNER_TEMP/trivy-empty-ignore.yaml"
+
+      # This is deliberately a repository/lockfile and configuration scan.
+      # CodeQL remains the SAST authority, GitHub Secret Protection remains the
+      # secret scanner, and CI's Trivy jobs remain the built-image scanners.
+      - name: Gate fixable high and critical repository findings
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          trivy-config: ${{ runner.temp }}/trivy-blocking.yaml
+          trivyignores: ${{ runner.temp }}/trivy-empty-ignore.yaml
+          scanners: vuln,misconfig
+          skip-dirs: node_modules
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          format: table
+          exit-code: '1'
+
+  baseline:
+    name: Repository security baseline
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Create trusted Trivy policy
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '{}\n' > "$RUNNER_TEMP/trivy-blocking.yaml"
+          printf '%s\n' \
+            'vulnerabilities: []' \
+            'misconfigurations: []' \
+            'secrets: []' \
+            'licenses: []' \
+            > "$RUNNER_TEMP/trivy-empty-ignore.yaml"
+
+      # Existing medium and currently-unfixable alerts remain visible and
+      # tracked without becoming an impossible merge gate. This job never runs
+      # for a PR, so PR code never receives security-events:write.
+      - name: Record the non-blocking repository baseline
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          trivy-config: ${{ runner.temp }}/trivy-blocking.yaml
+          trivyignores: ${{ runner.temp }}/trivy-empty-ignore.yaml
+          scanners: vuln,misconfig
+          skip-dirs: node_modules
+          severity: MEDIUM,HIGH,CRITICAL
+          limit-severities-for-sarif: true
+          format: sarif
+          output: trivy-repository.sarif
+          exit-code: '0'
+
+      - name: Upload the repository security baseline
+        uses: github/codeql-action/upload-sarif@d1ba80a13dd99fba24a470575428917156a28b43 # v4.37.5
+        with:
+          sarif_file: trivy-repository.sarif
+          category: trivy-repository
+
+  dependency-review:
+    name: New dependency vulnerabilities
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      contents: read
+
+    steps:
+      # Dependency Review compares the base/head snapshots and therefore gates
+      # only newly introduced vulnerable dependencies, not historical medium
+      # findings already tracked by the repository baseline.
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          license-check: false
+          comment-summary-in-pr: never
+          show-patched-versions: true
+          retry-on-snapshot-warnings: true
+          retry-on-snapshot-warnings-timeout: 60
