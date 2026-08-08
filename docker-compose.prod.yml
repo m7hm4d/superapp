@@ -3,8 +3,8 @@
 #   • الهجرات تُطبَّق في خدمة لمرة واحدة قبل إقلاع الـAPI، لا يدوياً.
 #   • ‏restart: unless-stopped على كل خدمة دائمة — تعود بعد إعادة تشغيل الخادم.
 #
-#   ./deploy/deploy.sh                    ← الإنتاج
-#   ./deploy/deploy.sh --env .env.stage    ← بيئة التجربة
+#   ./deploy/deploy.sh sha-<git-sha الكامل>                    ← الإنتاج
+#   ./deploy/deploy.sh --env .env.stage sha-<git-sha الكامل>  ← بيئة التجربة
 #
 # الصور تُسحب من GHCR ولا تُبنى هنا: البناء يحدث في CI مرة واحدة، والناتج
 # موقَّع. البناء محلياً للتطوير عبر docker-compose.build.yml.
@@ -17,6 +17,14 @@ services:
   db:
     image: postgis/postgis:17-3.5@sha256:45f2a608397fa67d236b012c14a9e3ea31e9fe813edbeb5c1c0d1acbf0d48ea9
     restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '5'
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER مطلوب}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD مطلوب}
@@ -37,11 +45,26 @@ services:
   migrate:
     image: ${API_IMAGE:?API_IMAGE مطلوب}
     restart: 'no'
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '5'
     # بلا قيمة افتراضية عمداً. القيمة الافتراضية هنا كانت الخلل نفسه: أمرٌ
     # يستهدف التجربة وينسى ENV_FILE كان **ينجح** ويسلّم الحاوية بيئة الإنتاج،
     # فتُسمّى superapp-stage-api وتحمل رابط قاعدة الإنتاج وأسرارها. الخطأ
     # الصامت أخطر من الخطأ الصاخب — فليصرخ.
-    env_file: ['${ENV_FILE:?ENV_FILE مطلوب — استعمل deploy/compose.sh أو deploy/deploy.sh}']
+    env_file:
+      [
+        '${ENV_FILE:?ENV_FILE مطلوب — استعمل deploy/compose.sh أو deploy/deploy.sh}',
+      ]
     depends_on:
       db:
         condition: service_healthy
@@ -50,11 +73,28 @@ services:
   api:
     image: ${API_IMAGE:?API_IMAGE مطلوب}
     restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '5'
     # بلا قيمة افتراضية عمداً. القيمة الافتراضية هنا كانت الخلل نفسه: أمرٌ
     # يستهدف التجربة وينسى ENV_FILE كان **ينجح** ويسلّم الحاوية بيئة الإنتاج،
     # فتُسمّى superapp-stage-api وتحمل رابط قاعدة الإنتاج وأسرارها. الخطأ
     # الصامت أخطر من الخطأ الصاخب — فليصرخ.
-    env_file: ['${ENV_FILE:?ENV_FILE مطلوب — استعمل deploy/compose.sh أو deploy/deploy.sh}']
+    env_file:
+      [
+        '${ENV_FILE:?ENV_FILE مطلوب — استعمل deploy/compose.sh أو deploy/deploy.sh}',
+      ]
+    environment:
+      APP_REVISION: ${APP_REVISION:?APP_REVISION مطلوب}
     depends_on:
       db:
         condition: service_healthy
@@ -74,7 +114,20 @@ services:
     # الواحدة لكل بيئة. ‏NEXT_PUBLIC_API_URL المخبوز يبقى احتياطاً للتطوير.
     environment:
       API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL مطلوب}
+      APP_REVISION: ${APP_REVISION:?APP_REVISION مطلوب}
     restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '5'
     depends_on: [api]
     expose: ['3001']
     networks:
