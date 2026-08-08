@@ -4,7 +4,7 @@
 
 ## الحالة الحالية
 
-يوجد في هذا الفرع مسار نشر محمي إلى Ubuntu VPS الخارجي، لكنه غير مفعّل تشغيلياً بعد. لم تُنشأ GitHub Environment باسم `production`، ولم تُضبط أسرارها أو متغيراتها، ولم يثبت تشغيل إنتاج ناجح من `main`.
+يوجد في هذا الفرع مسار نشر محمي إلى Ubuntu VPS الخارجي، لكنه غير مفعّل تشغيلياً بعد. أُنشئت GitHub Environment باسم `production` في 2026-08-08، وقُيّدت بالفروع المحمية، وأضيف الحساب المالك مراجعاً مطلوباً. أُعيدت قراءة الإعدادات وتأكد أن البيئة بلا أسرار وبلا deployments. لم تُضبط بعد متغيرات الاتصال أو مفتاح SSH، ولم يثبت تشغيل إنتاج ناجح من `main`.
 
 يتوقف job النشر ما لم تكن قيمة repository variable التالية مطابقة تماماً للنص `true`:
 
@@ -57,19 +57,19 @@ Repository vulnerabilities and IaC
 Deploy immutable image to production
 ```
 
-## إعداد GitHub اليدوي
+## حالة GitHub والإعداد اليدوي المتبقي
 
-لا يستطيع commit إنشاء حماية Environment أو قيم الأسرار والمتغيرات. ينفذ مالك المستودع هذه الخطوات يدوياً ثم يعيد التحقق منها من GitHub.
+لا يستطيع commit إنشاء حماية Environment أو قيم الأسرار والمتغيرات. أُنشئت الحماية الخارجية لهذه المهمة عبر GitHub API ثم أُعيدت قراءتها؛ تبقى القيم التشغيلية والأسرار أدناه بيد المالك.
 
 ### Environment
 
-أنشئ Environment بالاسم الدقيق:
+الـEnvironment الموجودة تحمل الاسم الدقيق:
 
 ```text
 production
 ```
 
-اضبط، عند توفر مراجع ثانٍ، مراجعاً مطلوباً واحداً على الأقل مع `Prevent self-review`. قيد فروع النشر إلى `main`، وامنع bypass الإداري إن كانت خطة GitHub تسمح. لا تفعّل النشر قبل نجاح تجربة staging موثقة.
+الحالة المتحققة هي مراجع مطلوب واحد هو مالك المستودع، وسياسة `protected branches only`. لأن المستودع لا يملك متعاوناً موثوقاً ثانياً، بقي `Prevent self-review` معطلاً كي لا ينغلق مسار النشر نهائياً، وما زال bypass الإداري متاحاً وفق إعداد GitHub. عند إضافة مراجع ثانٍ استبدل المراجع الذاتي وفعّل `Prevent self-review`، وامنع bypass الإداري إن كانت خطة GitHub تسمح. لا تفعّل النشر قبل نجاح تجربة staging موثقة.
 
 [GitHub: deployment environments and protection rules](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)
 
@@ -114,13 +114,13 @@ https://api.example.com
 https://admin.example.com
 ```
 
-المتغير الوحيد على مستوى repository هو مفتاح الإتاحة:
+مفتاح الإتاحة التالي مضبوط فعلياً على مستوى repository:
 
 ```text
 PRODUCTION_DEPLOY_ENABLED=false
 ```
 
-غيّره إلى `true` فقط بعد إكمال قائمة القبول أدناه. لا توجد قيمة افتراضية تسمح بالنشر.
+أُعيدت قراءة قيمته وتأكد أنها `false`. غيّره إلى `true` فقط بعد إكمال قائمة القبول أدناه. لا توجد قيمة افتراضية تسمح بالنشر.
 
 ## تجهيز VPS
 
@@ -277,9 +277,9 @@ export DEPLOY_STATE_DIR="${production_app_path}/.deploy"
 
 - نجحت jobs التسعة المذكورة للـSHA نفسه على push حقيقي إلى `main`، ونجح `Publish` للـSHA نفسه.
 
-- ruleset يطلب checks الفعلية بعد ظهور أسمائها مرة في GitHub، بما فيها `contract` وفحوص الأمان.
+- ruleset يطلب `contract` مع فحوص CI/CodeQL الموجودة؛ أضيف فحصا Security بعد دمج workflow نفسه إلى `main` ونجاحه هناك.
 
-- أنشئت Environment وحمايتها وأسرارها ومتغيراتها يدوياً، ثم أعيدت قراءتها من الإعدادات بلا عرض قيم الأسرار.
+- Environment موجودة ومقيدة بالفروع المحمية ولها مراجع مطلوب؛ أضيفت أسرارها ومتغيراتها التشغيلية يدوياً ثم أعيدت قراءة أسمائها من الإعدادات بلا عرض قيم الأسرار.
 
 - جرى التحقق خارج القناة من SSH host fingerprint، والمستخدم غير root، والمسار والملف البيئي والصلاحيات صحيحة.
 
@@ -301,4 +301,4 @@ PRODUCTION_DEPLOY_ENABLED=true
 
 ## ما لا يثبته هذا الملف
 
-لا يعني وجود workflow أن GitHub Environment أو required reviewers أو secrets أو variables ضُبطت. ولا يعني نجاح `Publish` أن production تغير؛ يمكن أن يبقى مفتاح الإتاحة مغلقاً أو تتوقف الموافقة. لا توجد من هذه المهمة موارد AWS أو OIDC roles أو S3 أو SSM أو CloudWatch مفعّلة.
+الحالة الخارجية المتحققة في 2026-08-08 هي Environment محمية ومراجع مطلوب ومتغير إتاحة قيمته `false`، بلا أسرار أو deployments؛ يمكن أن تنحرف إعدادات GitHub لاحقاً، لذلك يجب إعادة قراءتها قبل التفعيل. ولا يعني نجاح `Publish` أن production تغير؛ يبقى مفتاح الإتاحة مغلقاً أو تتوقف الموافقة. لا توجد من هذه المهمة موارد AWS أو OIDC roles أو S3 أو SSM أو CloudWatch مفعّلة.

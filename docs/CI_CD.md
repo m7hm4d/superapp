@@ -181,9 +181,21 @@ tested SHA = security-scanned SHA = built SHA = signed digest source SHA = deplo
 Settings -> Rules -> Rulesets -> protect-main
 ```
 
-احتفظ بالضوابط الموجودة وأضف:
+الحالة المطبقة والمتحققة في 2026-08-08:
 
 - Require a pull request before merging.
+
+- Require conversation resolution وRequire branches to be up to date.
+
+- Block force pushes and deletion، بلا bypass للـruleset.
+
+- Require linear history؛ عطلت merge commits، وبقي Squash وRebase فقط.
+
+- أضيف `contract` إلى required checks بعد نجاحه على PR حي.
+
+- فُعّل زر Update Branch والحذف الآلي للفرع بعد الدمج.
+
+المتبقي بعد إضافة متعاون موثوق ثانٍ:
 
 - Required approvals: `1` بعد توفر مراجع ثانٍ. تفعيلها فوراً مع مالك وحيد قد يمنع كل دمج، لأن صاحب PR لا يعتمد نفسه.
 
@@ -193,17 +205,9 @@ Settings -> Rules -> Rulesets -> protect-main
 
 - Require review from Code Owners عند توفر مراجع ثانٍ؛ ملف `.github/CODEOWNERS` موجود لكن لا يفرض نفسه.
 
-- Require conversation resolution.
+- راجع إبقاء Rebase متاحاً أو اجعل Squash وحده أسلوب الفريق، من دون إعادة تمكين merge commits.
 
-- Require branches to be up to date.
-
-- Block force pushes and deletion.
-
-- Require linear history، ثم اترك Squash merge كأسلوب الفريق المفضل.
-
-- لا تسمح bypass إلا لحساب break-glass مراقب، وإن أمكن اجعل القاعدة مطبقة على administrators.
-
-أضف required checks بعد أن تعمل مرة على PR ويظهر اسمها النهائي، لا بكتابة اسم متوقع. الحد الأدنى:
+الفحوص الثمانية التالية مطلوبة فعلياً الآن:
 
 ```text
 test
@@ -214,6 +218,11 @@ expo (customer)
 expo (vendor)
 expo (driver)
 analyze
+```
+
+بعد دمج workflow الأمان إلى `main` ونجاح تشغيله من الفرع الافتراضي، أضف الاسمين التاليين. لا تضفهما قبله لأن PR لا يحتوي workflow الجديد لن يستطيع إنتاجهما:
+
+```text
 Repository vulnerabilities and IaC
 New dependency vulnerabilities
 ```
@@ -518,9 +527,9 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod config --quiet
 
 ## ما لا يجوز ادعاؤه قبل الإثبات
 
-- وجود ملف workflow لا يعني أن ruleset يطلبه.
+- وجود ملف workflow لا يعني أن ruleset يطلبه؛ الحالة المتحققة تطلب `contract` الآن، وتؤجل فحصي Security إلى ما بعد دمج workflow نفسه.
 
-- الإشارة إلى `environment: production` لا تعني أن required reviewer أو secrets ضُبطت.
+- الإشارة إلى `environment: production` وحدها لا تكفي؛ الحالة المتحققة لها مراجع مطلوب وفروع محمية ومفتاح إتاحة `false`، لكنها بلا أسرار أو deployment فعلي.
 
 - نجاح Agent Toolkit لا يعني تثبيت Amazon Q GitHub.
 
