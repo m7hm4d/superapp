@@ -168,6 +168,19 @@ describe('admin TOTP is mandatory', () => {
       });
   });
 
+  /**
+   * رمز TOTP صالح فوراً: الرمز المستعمل في الدخول مستهلَك، والانتظار خطوةً
+   * جديدة ثلاثون ثانية. تصفير العدّاد إعداد اختبار لا تغيير منتج — ومنع
+   * إعادة الاستعمال نفسه مُختبَر في هذا الملف.
+   */
+  const totpAfterReset = async (userId: string, secret: string): Promise<string> => {
+    await db
+      .update(adminCredentials)
+      .set({ lastTotpStep: null })
+      .where(eq(adminCredentials.userId, userId));
+    return totp.generate(secret);
+  };
+
   it('re-enrollment keeps the working device until the new one is confirmed', async () => {
     const secret = totp.generateSecret();
     const admin = await createAdmin(db, { secret });
@@ -177,9 +190,17 @@ describe('admin TOTP is mandatory', () => {
       totp: totp.generate(secret),
     }).expect(200);
 
+    // جلسة وحدها لا تستبدل عاملاً قائماً: لولا هذا لكفت جلسة مسروقة
+    // لانتزاع العامل الثاني من صاحبه.
+    await request(http)
+      .post('/api/v1/auth/admin/totp/setup')
+      .set('Authorization', `Bearer ${session.body.tokens.accessToken}`)
+      .expect(401);
+
     const setup = await request(http)
       .post('/api/v1/auth/admin/totp/setup')
       .set('Authorization', `Bearer ${session.body.tokens.accessToken}`)
+      .send({ password: ADMIN_PASSWORD, totp: await totpAfterReset(admin.userId, secret) })
       .expect(201);
 
     // السر الفعّال لم يتغيّر — الجهاز القديم ما زال هو المعتمد

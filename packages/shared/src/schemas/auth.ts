@@ -94,3 +94,18 @@ export const zAdminRecoveryRegenerate = z.object({
 });
 export type AdminRecoveryRegenerateInput = z.infer<typeof zAdminRecoveryRegenerate>;
 
+/**
+ * إعادة تحقق حديثة قبل استبدال عامل قائم.
+ *
+ * كلمة المرور مع العامل الحالي — أو رمز استرداد لمن ضاع جهازه. بلا هذا
+ * تكفي جلسة مسروقة وحدها لاستبدال عامل صاحب الحساب.
+ */
+export const zAdminTotpSetup = z
+  .object({
+    password: z.string().min(1).optional(),
+    totp: z.string().regex(/^\d{6}$/).optional(),
+    recoveryCode: z.string().min(8).max(64).optional(),
+  })
+  .optional();
+export type AdminTotpSetupInput = z.infer<typeof zAdminTotpSetup>;
+

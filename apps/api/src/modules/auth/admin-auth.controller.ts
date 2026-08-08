@@ -1,5 +1,8 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Post, Req } from '@nestjs/common';
 import {
+  Header, Body, Controller, Delete, Get, HttpCode, Param, Post, Req } from '@nestjs/common';
+import {
+  zAdminTotpSetup,
+  type AdminTotpSetupInput,
   zAdminChangePassword,
   zAdminRecoveryRegenerate,
   type AdminChangePasswordInput,
@@ -57,8 +60,16 @@ export class AdminAuthController {
   @Roles(Role.ADMIN)
   @AllowScopes(TOTP_ENROLLMENT_SCOPE)
   @Post('totp/setup')
-  setupTotp(@CurrentUser() user: RequestUser) {
-    return this.adminAuth.setupTotp(user.id);
+  setupTotp(
+    @CurrentUser() user: RequestUser,
+    @Body(new ZodValidationPipe(zAdminTotpSetup)) body: AdminTotpSetupInput,
+  ) {
+    // الجسم اختياري: التسجيل الأول لا إثبات له، والاستبدال يشترطه —
+    // والخدمة هي من تقرّر أيّهما، لا المتحكّم.
+    return this.adminAuth.setupTotp(
+      user.id,
+      body?.password ? { password: body.password, totp: body.totp, recoveryCode: body.recoveryCode } : undefined,
+    );
   }
 
   /** يعيد جلسة كاملة عند النجاح — فينتهي التسجيل بالمستخدم داخل اللوحة مباشرة */
@@ -155,6 +166,7 @@ export class AdminAuthController {
    * محمي بالجلسة كبقية مسارات هذا المتحكّم، فلا يُقبل بتوكن محدود النطاق —
    * توكن التسجيل أو الخطوة الثانية لا يفتح تغيير كلمة المرور.
    */
+  @Roles(Role.ADMIN)
   @HttpCode(200)
   @Post('password')
   changePassword(
@@ -166,6 +178,7 @@ export class AdminAuthController {
   }
 
   /** كم رمز استرداد بقي — لتعرف اللوحة متى تنبّه */
+  @Roles(Role.ADMIN)
   @Get('recovery-codes')
   recoveryStatus(@CurrentUser() user: RequestUser) {
     return this.recovery.remaining(user.id).then((remaining) => ({ remaining }));
@@ -177,13 +190,16 @@ export class AdminAuthController {
    * يشترط كلمة المرور ورمز TOTP: من وصل إلى جهاز مفتوح لا يستطيع أن يطبع
    * لنفسه مفاتيح دخول دائمة.
    */
+  @Roles(Role.ADMIN)
   @HttpCode(200)
   @Post('recovery-codes')
+  @Header('Cache-Control', 'no-store')
+  @Header('Pragma', 'no-cache')
   async regenerateRecovery(
     @CurrentUser() user: RequestUser,
     @Body(new ZodValidationPipe(zAdminRecoveryRegenerate)) body: AdminRecoveryRegenerateInput,
   ) {
-    await this.adminAuth.assertPasswordAndTotp(user.id, body.password, body.totp);
+    await this.adminAuth.assertPasswordAndSecondFactor(user.id, body.password, { totp: body.totp });
     return { codes: await this.recovery.regenerate(user.id) };
   }
 }
