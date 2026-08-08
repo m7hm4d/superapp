@@ -44,7 +44,10 @@ export const api = createApiClient({
       // تجاهل — إعادة التوجيه كافية
     }
     if (!window.location.pathname.startsWith('/login')) {
-      window.location.href = '/login';
+      // السبب يُمرَّر: القذف الصامت إلى الدخول يجعل المستخدم يظنّ أن عمليته
+      // هي التي فشلت، بينما جلسته هي التي انتهت — بعد تغيير كلمة المرور
+      // مثلاً، وهو ما يُبطل الجلسات كلها بما فيها الحالية.
+      window.location.href = '/login?reason=session';
     }
   },
 });

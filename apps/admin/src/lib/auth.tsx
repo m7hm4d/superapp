@@ -81,7 +81,11 @@ export type LoginOutcome =
 
 export interface UseAuthResult {
   user: AuthUser | null;
-  login: (email: string, password: string, totp?: string) => Promise<LoginOutcome>;
+  login: (
+    email: string,
+    password: string,
+    factor?: { totp?: string; recoveryCode?: string },
+  ) => Promise<LoginOutcome>;
   /** تثبيت الجلسة بعد إتمام تسجيل TOTP */
   adoptSession: (user: AuthUser, tokens: AuthTokens) => Promise<void>;
   logout: () => Promise<void>;
@@ -96,28 +100,32 @@ export function useAuth(): UseAuthResult {
   const user = useSyncExternalStore(subscribe, readUser, getServerSnapshot);
   const router = useRouter();
 
-  const login = useCallback(async (email: string, password: string, totp?: string) => {
-    const res = await api.post<AdminLoginResponse>('auth/admin/login', {
-      email,
-      password,
-      ...(totp ? { totp } : {}),
-    });
-    if (res.status === 'second_factor_required') {
-      // التوكن يبقى في الذاكرة فقط: عمره دقيقتان ولا معنى لبقائه بعد الصفحة
-      return {
-        kind: 'second_factor',
-        stepUpToken: res.stepUpToken,
-        methods: res.methods,
-      } satisfies LoginOutcome;
-    }
-    if (res.status === 'totp_enrollment_required') {
-      await enrollmentTokens.set({ accessToken: res.enrollmentToken, refreshToken: '' });
-      return { kind: 'enrollment', email: res.email } satisfies LoginOutcome;
-    }
-    await localStorageTokens.set(res.tokens);
-    writeUser(res.user);
-    return { kind: 'session', user: res.user } satisfies LoginOutcome;
-  }, []);
+  const login = useCallback(
+    async (email: string, password: string, factor?: { totp?: string; recoveryCode?: string }) => {
+      const res = await api.post<AdminLoginResponse>('auth/admin/login', {
+        email,
+        password,
+        ...(factor?.totp ? { totp: factor.totp } : {}),
+        ...(factor?.recoveryCode ? { recoveryCode: factor.recoveryCode } : {}),
+      });
+      if (res.status === 'second_factor_required') {
+        // التوكن يبقى في الذاكرة فقط: عمره دقيقتان ولا معنى لبقائه بعد الصفحة
+        return {
+          kind: 'second_factor',
+          stepUpToken: res.stepUpToken,
+          methods: res.methods,
+        } satisfies LoginOutcome;
+      }
+      if (res.status === 'totp_enrollment_required') {
+        await enrollmentTokens.set({ accessToken: res.enrollmentToken, refreshToken: '' });
+        return { kind: 'enrollment', email: res.email } satisfies LoginOutcome;
+      }
+      await localStorageTokens.set(res.tokens);
+      writeUser(res.user);
+      return { kind: 'session', user: res.user } satisfies LoginOutcome;
+    },
+    [],
+  );
 
   const adoptSession = useCallback(async (nextUser: AuthUser, tokens: AuthTokens) => {
     await localStorageTokens.set(tokens);

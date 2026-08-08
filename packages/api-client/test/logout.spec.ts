@@ -161,3 +161,95 @@ describe('createApiClient يرفض العناوين غير المشفَّرة', 
     );
   });
 });
+
+/**
+ * انحدار: خطأ مجاليّ يُطرد المستخدم من جلسة سليمة.
+ *
+ * كل 401 كان يمسح المخزن ويستدعي `onUnauthorized`. لكن مسارات الأمان تردّ
+ * 401 لأسباب مجاليّة — رمز استرداد خاطئ، كلمة مرور حالية خاطئة، رمز مصادقة
+ * منتهٍ. فمن أخطأ رمزاً واحداً كان يُقذف إلى صفحة الدخول ويُقال له إن جلسته
+ * انتهت: خبر كاذب يدفعه إلى الظنّ أن حسابه أصابه شيء.
+ */
+describe('401 مجاليّ لا يُنهي الجلسة', () => {
+  const seedTokens = async () => {
+    const storage = memoryStorage();
+    await storage.set({ accessToken: jwtValidFor(3600), refreshToken: 'refresh-0' });
+    return storage;
+  };
+  const jwtValidFor = (seconds: number): string => {
+    const json = JSON.stringify({ exp: Math.floor(Date.now() / 1000) + seconds });
+    const payload = btoa(json).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    return `header.${payload}.signature`;
+  };
+  const unauthorized = (code: string) =>
+    new Response(JSON.stringify({ code }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+  let fetchMock: ReturnType<typeof vi.fn>;
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  it('رمز استرداد خاطئ: يرمي ولا يمسح ولا يستدعي onUnauthorized', async () => {
+    const storage = await seedTokens();
+    const onUnauthorized = vi.fn();
+    // الطلب أولاً فيعود 401، ثم التجديد ينجح، ثم يعود الطلب 401 مجاليّاً
+    fetchMock
+      .mockResolvedValueOnce(unauthorized('RECOVERY_CODE_INVALID'))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ tokens: { accessToken: jwtValidFor(3600), refreshToken: 'r1' } }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValue(unauthorized('RECOVERY_CODE_INVALID'));
+
+    const client = createApiClient({ baseUrl: 'https://api.test', storage, onUnauthorized });
+    await expect(client.post('auth/admin/password', {})).rejects.toMatchObject({
+      code: 'RECOVERY_CODE_INVALID',
+    });
+
+    expect(onUnauthorized).not.toHaveBeenCalled();
+    expect(await storage.getRefresh()).toBe('r1'); // الجلسة سليمة
+  });
+
+  it('وكذلك كلمة مرور حالية خاطئة', async () => {
+    const storage = await seedTokens();
+    const onUnauthorized = vi.fn();
+    fetchMock.mockResolvedValue(unauthorized('INVALID_CREDENTIALS'));
+
+    const client = createApiClient({ baseUrl: 'https://api.test', storage, onUnauthorized });
+    await expect(client.post('auth/admin/password', {})).rejects.toMatchObject({
+      code: 'INVALID_CREDENTIALS',
+    });
+    expect(onUnauthorized).not.toHaveBeenCalled();
+    expect(await storage.getRefresh()).not.toBeNull();
+  });
+
+  /** أما ما يخصّ التوكن فيُنهي الجلسة كما يجب */
+  it('SESSION_REVOKED يمسح ويستدعي onUnauthorized', async () => {
+    const storage = await seedTokens();
+    const onUnauthorized = vi.fn();
+    fetchMock.mockResolvedValue(unauthorized('SESSION_REVOKED'));
+
+    const client = createApiClient({ baseUrl: 'https://api.test', storage, onUnauthorized });
+    await expect(client.get('auth/me')).rejects.toMatchObject({ code: 'SESSION_REVOKED' });
+
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    expect(await storage.getRefresh()).toBeNull();
+  });
+
+  /** و401 بلا رمز معروف يُعامَل كموت جلسة — الغياب يفشل إلى الجانب الآمن */
+  it('401 بلا رمز يُنهي الجلسة', async () => {
+    const storage = await seedTokens();
+    const onUnauthorized = vi.fn();
+    fetchMock.mockResolvedValue(new Response('', { status: 401 }));
+
+    const client = createApiClient({ baseUrl: 'https://api.test', storage, onUnauthorized });
+    await expect(client.get('auth/me')).rejects.toThrow();
+    expect(onUnauthorized).toHaveBeenCalled();
+  });
+});

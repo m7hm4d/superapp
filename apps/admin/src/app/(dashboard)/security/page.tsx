@@ -1,49 +1,15 @@
 'use client';
 
-import { useState, type ChangeEvent } from 'react';
+import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '@superapp/api-client';
-import { formatDate, formatTime } from '@superapp/i18n';
 import { api } from '@/lib/api';
-import {
-  Badge,
-  Button,
-  Card,
-  ConfirmDialog,
-  DataTable,
-  ErrorState,
-  Input,
-  KpiCard,
-  PageHeader,
-  Select,
-  Skeleton,
-} from '@/components/ui';
-
-interface AuthEventRow {
-  id: string;
-  userId: string | null;
-  fullName: string | null;
-  role: string | null;
-  method: string;
-  outcome: string;
-  sessionFamilyId: string | null;
-  ip: string | null;
-  userAgent: string | null;
-  createdAt: string;
-}
-
-interface SessionRow {
-  familyId: string;
-  userId: string;
-  fullName: string;
-  role: string;
-  phone: string;
-  startedAt: string;
-  lastSeenAt: string;
-  expiresAt: string;
-  ip: string | null;
-  userAgent: string | null;
-}
+import { cn } from '@/lib/cn';
+import { ConfirmDialog, ErrorState, KpiCard, PageHeader, Skeleton } from '@/components/ui';
+import { AuthLogCard, FAILED_FILTER, PAGE_SIZE } from './_components/auth-log-card';
+import { deviceLabel } from './_components/device';
+import { SessionsCard } from './_components/sessions-card';
+import type { AuthEventRow, LogFilters, Paginated, SessionRow } from './_components/types';
 
 interface Summary {
   since: string;
@@ -53,89 +19,54 @@ interface Summary {
   distinctIps: number;
 }
 
-interface Paginated<T> {
-  items: T[];
-  total: number;
-  limit: number;
-  offset: number;
-}
-
-const PAGE_SIZE = 50;
-
-const OUTCOME_AR: Record<string, { label: string; tone: 'gray' | 'green' | 'red' | 'amber' | 'blue' | 'purple' }> = {
-  success: { label: 'دخول ناجح', tone: 'green' },
-  invalid_credentials: { label: 'كلمة مرور خاطئة', tone: 'red' },
-  unknown_identifier: { label: 'حساب غير موجود', tone: 'red' },
-  totp_required: { label: 'طُلب رمز التحقق', tone: 'gray' },
-  totp_invalid: { label: 'رمز تحقق خاطئ', tone: 'red' },
-  totp_replayed: { label: 'رمز مُستعمَل سلفاً', tone: 'red' },
-  enrollment_required: { label: 'يحتاج تسجيل جهاز', tone: 'amber' },
-  enrollment_completed: { label: 'سجّل جهاز مصادقة', tone: 'blue' },
-  blocked: { label: 'حساب محظور', tone: 'red' },
-  admin_login_denied: { label: 'أدمن حاول من مسار الهاتف', tone: 'red' },
-  refresh_reuse: { label: 'إعادة استخدام توكن', tone: 'red' },
-  logout: { label: 'خروج', tone: 'gray' },
-  session_revoked: { label: 'قُطعت الجلسة', tone: 'purple' },
-};
-
-const METHOD_AR: Record<string, string> = {
-  phone_password: 'هاتف + كلمة مرور',
-  admin_password_totp: 'لوحة الإدارة (2FA)',
-  refresh: 'تجديد توكن',
-  logout: 'خروج',
-  admin_action: 'إجراء إداري',
-};
-
-const ROLE_AR: Record<string, string> = {
-  customer: 'زبون',
-  vendor: 'متجر',
-  driver: 'سائق',
-  admin: 'إدارة',
-};
-
-const OUTCOME_OPTIONS = [
-  { value: '', label: 'كل النتائج' },
-  ...Object.entries(OUTCOME_AR).map(([value, v]) => ({ value, label: v.label })),
-];
-
 function arError(e: unknown): string {
   if (e instanceof ApiError) return `تعذر تنفيذ العملية (${e.code})`;
   return 'حدث خطأ غير متوقع';
-}
-
-/** متصفح/نظام مختصر من user-agent — يكفي لتمييز الأجهزة دون عرض السلسلة كاملة */
-function deviceLabel(ua: string | null): string {
-  if (!ua) return '—';
-  const browser =
-    /Edg\//.test(ua) ? 'Edge'
-    : /Chrome\//.test(ua) ? 'Chrome'
-    : /Safari\//.test(ua) && !/Chrome/.test(ua) ? 'Safari'
-    : /Firefox\//.test(ua) ? 'Firefox'
-    : /okhttp|Expo|ReactNative/i.test(ua) ? 'تطبيق الجوال'
-    : 'متصفح آخر';
-  const os =
-    /iPhone|iPad|iOS/.test(ua) ? 'iOS'
-    : /Android/.test(ua) ? 'Android'
-    : /Mac OS X/.test(ua) ? 'macOS'
-    : /Windows/.test(ua) ? 'Windows'
-    : /Linux/.test(ua) ? 'Linux'
-    : '';
-  return os ? `${browser} — ${os}` : browser;
-}
-
-function when(value: string): string {
-  return `${formatDate(value)} — ${formatTime(value)}`;
 }
 
 export default function SecurityPage() {
   const queryClient = useQueryClient();
   const [outcome, setOutcome] = useState('');
   const [userId, setUserId] = useState('');
+  const [userLabel, setUserLabel] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
   const [revokeTarget, setRevokeTarget] = useState<SessionRow | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
 
-  const userFilter = userId.trim().length === 36 ? { userId: userId.trim() } : {};
+  // كل تغيير في التصفية يعيد الترقيم إلى أوّله: البقاء على الصفحة الثالثة
+  // بعد تضييق النتائج يُظهر جدولاً فارغاً ويُقرأ «لا شيء هنا».
+  const filters: LogFilters = useMemo(
+    () => ({
+      outcome,
+      userId,
+      userLabel,
+      offset,
+      setOutcome: (v) => {
+        setOutcome(v);
+        setOffset(0);
+      },
+      setUser: (id, label) => {
+        setUserId(id);
+        setUserLabel(label);
+        setOffset(0);
+      },
+      clearUser: () => {
+        setUserId('');
+        setUserLabel(null);
+        setOffset(0);
+      },
+      clearAll: () => {
+        setOutcome('');
+        setUserId('');
+        setUserLabel(null);
+        setOffset(0);
+      },
+      setOffset,
+    }),
+    [outcome, userId, userLabel, offset],
+  );
+
+  const userFilter = userId.length === 36 ? { userId } : {};
 
   const summaryQuery = useQuery({
     queryKey: ['auth-events', 'summary'],
@@ -143,11 +74,20 @@ export default function SecurityPage() {
   });
 
   const sessionsQuery = useQuery({
-    queryKey: ['sessions', userFilter],
-    queryFn: () => api.get<Paginated<SessionRow>>('admin/sessions', { ...userFilter, limit: 100, offset: 0 }),
+    queryKey: ['sessions'],
+    queryFn: () =>
+      api.get<Paginated<SessionRow>>('admin/sessions', {
+        limit: 100,
+        offset: 0,
+      }),
   });
 
-  const eventsFilters = { ...userFilter, ...(outcome ? { outcome } : {}), limit: PAGE_SIZE, offset };
+  const eventsFilters = {
+    ...userFilter,
+    ...(outcome ? { outcome } : {}),
+    limit: PAGE_SIZE,
+    offset,
+  };
   const eventsQuery = useQuery({
     queryKey: ['auth-events', eventsFilters],
     queryFn: () => api.get<Paginated<AuthEventRow>>('admin/auth-events', eventsFilters),
@@ -165,13 +105,13 @@ export default function SecurityPage() {
   });
 
   const summary = summaryQuery.data;
-  const total = eventsQuery.data?.total ?? 0;
+  const failuresActive = outcome === FAILED_FILTER;
 
   return (
     <div>
       <PageHeader
         title="الدخول والجلسات"
-        description="سجل محاولات الدخول والأجهزة المتصلة حالياً — يمكن قطع أي جلسة فوراً"
+        description="من يدخل، ومن هو متصل الآن — ويمكن قطع أي جلسة فوراً"
       />
 
       {banner && (
@@ -186,191 +126,83 @@ export default function SecurityPage() {
             <Skeleton key={i} className="h-24" />
           ))}
         </div>
+      ) : summaryQuery.isError ? (
+        <ErrorState message="تعذر تحميل الملخص" onRetry={() => void summaryQuery.refetch()} />
       ) : summary ? (
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           <KpiCard label="جلسات نشطة الآن" value={String(summary.activeSessions)} />
-          <KpiCard label="دخول ناجح (٢٤ ساعة)" value={String(summary.successCount)} tone="success" />
           <KpiCard
-            label="محاولات فاشلة (٢٤ ساعة)"
-            value={String(summary.failureCount)}
-            tone={summary.failureCount > 20 ? 'danger' : 'default'}
+            label="دخول ناجح (٢٤ ساعة)"
+            value={String(summary.successCount)}
+            tone="success"
           />
+          {/* الرقم الذي يقلق المشرف يجب أن يقوده إلى صفوفه، لا أن يتركه
+              يبحث في قائمة منسدلة فيها ثلاثة عشر خياراً. */}
+          <button
+            type="button"
+            onClick={() => {
+              filters.setOutcome(failuresActive ? '' : FAILED_FILTER);
+              document.getElementById('auth-log')?.scrollIntoView({ behavior: 'smooth' });
+            }}
+            aria-pressed={failuresActive}
+            className={cn(
+              'block h-full w-full rounded-card text-start transition',
+              failuresActive
+                ? 'ring-2 ring-red-400 ring-offset-2'
+                : 'hover:-translate-y-0.5 hover:shadow-md',
+            )}
+          >
+            <KpiCard
+              label="محاولات فاشلة (٢٤ ساعة)"
+              value={String(summary.failureCount)}
+              hint={failuresActive ? 'السجل مُصفّى بها — اضغط للإلغاء' : 'اضغط لعرضها في السجل'}
+              tone={summary.failureCount > 20 ? 'danger' : 'default'}
+            />
+          </button>
           <KpiCard label="عناوين مختلفة (٢٤ ساعة)" value={String(summary.distinctIps)} />
         </div>
       ) : null}
 
       <div className="mt-8">
-        <Card title="الجلسات النشطة">
-          {sessionsQuery.isError ? (
-            <ErrorState message="تعذر تحميل الجلسات" onRetry={() => void sessionsQuery.refetch()} />
-          ) : (
-            <DataTable<SessionRow>
-              loading={sessionsQuery.isPending}
-              empty="لا توجد جلسات نشطة"
-              rows={sessionsQuery.data?.items ?? []}
-              rowKey={(row) => row.familyId}
-              columns={[
-                { key: 'user', header: 'المستخدم', render: (row) => row.fullName },
-                {
-                  key: 'role',
-                  header: 'الدور',
-                  render: (row) => <Badge tone="gray">{ROLE_AR[row.role] ?? row.role}</Badge>,
-                },
-                { key: 'device', header: 'الجهاز', render: (row) => deviceLabel(row.userAgent) },
-                {
-                  key: 'ip',
-                  header: 'العنوان',
-                  render: (row) => (
-                    <span className="font-mono text-xs" dir="ltr">
-                      {row.ip ?? '—'}
-                    </span>
-                  ),
-                },
-                {
-                  key: 'last',
-                  header: 'آخر نشاط',
-                  render: (row) => <span className="text-gray-500">{when(row.lastSeenAt)}</span>,
-                },
-                {
-                  key: 'started',
-                  header: 'بدأت',
-                  render: (row) => <span className="text-gray-500">{when(row.startedAt)}</span>,
-                },
-                {
-                  key: 'actions',
-                  header: '',
-                  render: (row) => (
-                    <Button variant="danger" size="sm" onClick={() => setRevokeTarget(row)}>
-                      قطع الجلسة
-                    </Button>
-                  ),
-                },
-              ]}
-            />
-          )}
-        </Card>
+        <SessionsCard
+          sessions={sessionsQuery.data?.items ?? []}
+          total={sessionsQuery.data?.total ?? 0}
+          isPending={sessionsQuery.isPending}
+          isError={sessionsQuery.isError}
+          onRetry={() => void sessionsQuery.refetch()}
+          onRevoke={setRevokeTarget}
+          onFilterUser={(id, label) => {
+            filters.setUser(id, label);
+            document.getElementById('auth-log')?.scrollIntoView({ behavior: 'smooth' });
+          }}
+        />
       </div>
 
-      <div className="mt-8">
-        <Card
-          title="سجل عمليات الدخول"
-          actions={
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="w-72">
-                <Input
-                  placeholder="تصفية بمعرّف المستخدم (UUID)"
-                  value={userId}
-                  onChange={(e: ChangeEvent<HTMLInputElement>) => {
-                    setUserId(e.target.value);
-                    setOffset(0);
-                  }}
-                />
-              </div>
-              <div className="w-56">
-                <Select
-                  options={OUTCOME_OPTIONS}
-                  value={outcome}
-                  onChange={(v: string) => {
-                    setOutcome(v);
-                    setOffset(0);
-                  }}
-                />
-              </div>
-            </div>
-          }
-        >
-          {eventsQuery.isError ? (
-            <ErrorState message="تعذر تحميل السجل" onRetry={() => void eventsQuery.refetch()} />
-          ) : (
-            <>
-              <DataTable<AuthEventRow>
-                loading={eventsQuery.isPending}
-                empty="لا توجد أحداث مطابقة"
-                rows={eventsQuery.data?.items ?? []}
-                rowKey={(row) => row.id}
-                columns={[
-                  {
-                    key: 'when',
-                    header: 'الوقت',
-                    render: (row) => <span className="text-gray-500">{when(row.createdAt)}</span>,
-                  },
-                  {
-                    key: 'user',
-                    header: 'المستخدم',
-                    render: (row) =>
-                      row.fullName ?? <span className="text-gray-400">غير معروف</span>,
-                  },
-                  {
-                    key: 'role',
-                    header: 'الدور',
-                    render: (row) => (row.role ? ROLE_AR[row.role] ?? row.role : '—'),
-                  },
-                  {
-                    key: 'outcome',
-                    header: 'النتيجة',
-                    render: (row) => {
-                      const o = OUTCOME_AR[row.outcome] ?? { label: row.outcome, tone: 'gray' as const };
-                      return <Badge tone={o.tone}>{o.label}</Badge>;
-                    },
-                  },
-                  {
-                    key: 'method',
-                    header: 'المسار',
-                    render: (row) => METHOD_AR[row.method] ?? row.method,
-                  },
-                  {
-                    key: 'ip',
-                    header: 'العنوان',
-                    render: (row) => (
-                      <span className="font-mono text-xs" dir="ltr">
-                        {row.ip ?? '—'}
-                      </span>
-                    ),
-                  },
-                  { key: 'device', header: 'الجهاز', render: (row) => deviceLabel(row.userAgent) },
-                ]}
-              />
-
-              <div className="mt-4 flex items-center justify-between text-sm text-gray-600">
-                <span>
-                  {total} حدث — يظهر {Math.min(offset + 1, total)}–
-                  {Math.min(offset + PAGE_SIZE, total)}
-                </span>
-                <div className="flex gap-2">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={offset === 0}
-                    onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
-                  >
-                    السابق
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={offset + PAGE_SIZE >= total}
-                    onClick={() => setOffset(offset + PAGE_SIZE)}
-                  >
-                    التالي
-                  </Button>
-                </div>
-              </div>
-            </>
-          )}
-        </Card>
+      <div className="mt-8" id="auth-log">
+        <AuthLogCard
+          filters={filters}
+          data={eventsQuery.data}
+          isPending={eventsQuery.isPending}
+          isError={eventsQuery.isError}
+          onRetry={() => void eventsQuery.refetch()}
+        />
       </div>
 
       <ConfirmDialog
         open={revokeTarget !== null}
         onClose={() => setRevokeTarget(null)}
-        title="قطع الجلسة"
+        title={revokeTarget?.isCurrent ? 'إنهاء جلستك أنت' : 'قطع الجلسة'}
         body={
           revokeTarget
-            ? `ستُبطل جلسة ${revokeTarget.fullName} على ${deviceLabel(revokeTarget.userAgent)}. سيحتاج إلى تسجيل الدخول من جديد خلال دقائق (حتى انتهاء توكن الوصول الحالي).`
+            ? revokeTarget.isCurrent
+              ? // القطع صار فورياً منذ أن صار الحارس يفحص العائلة في كل طلب،
+                // فمن يقطع جلسته يخرج الآن لا بعد دقائق — والتحذير يقول ذلك.
+                `هذه جلستك على ${deviceLabel(revokeTarget.userAgent)}. ستخرج من اللوحة فوراً وتحتاج إلى تسجيل الدخول من جديد.`
+              : `ستُبطل جلسة ${revokeTarget.fullName} على ${deviceLabel(revokeTarget.userAgent)} فوراً، وسيحتاج إلى تسجيل الدخول من جديد.`
             : undefined
         }
         danger
-        confirmLabel="تأكيد القطع"
+        confirmLabel={revokeTarget?.isCurrent ? 'نعم، أنهِ جلستي' : 'تأكيد القطع'}
         onConfirm={async () => {
           if (!revokeTarget) return;
           await revokeMutation.mutateAsync(revokeTarget.familyId);

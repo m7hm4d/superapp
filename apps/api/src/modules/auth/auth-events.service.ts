@@ -124,8 +124,17 @@ export class AuthEventsService {
   /**
    * الجلسات النشطة = سلالات refresh التي فيها رمز حيّ (غير مُبطَل ولم ينتهِ).
    * كل تدوير يضيف صفاً للسلالة نفسها، فأحدث صف يمثل آخر نشاط.
+   *
+   * `currentFamilyId` — جلسة الطالب تُرتَّب أولاً دائماً. الترتيب بالأحدث وحده
+   * كان يُسقطها خارج الصفحة الأولى متى تجاوزت الجلسات الحيّة حدّ الصفحة (٣٤٥
+   * منها في قاعدة التطوير مقابل حدّ ١٠٠)، فتختفي بطاقة «جلستك الحالية» دون
+   * إشعار — ويقطع المشرف صفّه ظانّاً أنه لغيره، وهو الخطأ الذي وُجدت العلامة
+   * لمنعه أصلاً.
    */
-  async listActiveSessions(query: { userId?: string; limit: number; offset: number }): Promise<{
+  async listActiveSessions(
+    query: { userId?: string; limit: number; offset: number },
+    currentFamilyId?: string | null,
+  ): Promise<{
     items: SessionRow[];
     total: number;
     limit: number;
@@ -137,6 +146,11 @@ export class AuthEventsService {
     ];
     if (query.userId) conditions.push(eq(refreshTokens.userId, query.userId));
     const where = and(...conditions);
+
+    // `familyId` مفتاح تجميع، فمقارنته في ORDER BY مسموحة بلا تجميع إضافي
+    const order = currentFamilyId
+      ? [sql`(${refreshTokens.familyId} = ${currentFamilyId}) desc`, sql`max(${refreshTokens.createdAt}) desc`]
+      : [sql`max(${refreshTokens.createdAt}) desc`];
 
     // السلالة تخص مستخدماً واحداً، فالتجميع عليهما معاً يغني عن أي تحويل
     const [rows, [count]] = await Promise.all([
@@ -155,7 +169,7 @@ export class AuthEventsService {
         .innerJoin(users, eq(users.id, refreshTokens.userId))
         .where(where)
         .groupBy(refreshTokens.familyId, refreshTokens.userId, users.fullName, users.role, users.phone)
-        .orderBy(sql`max(${refreshTokens.createdAt}) desc`)
+        .orderBy(...order)
         .limit(query.limit)
         .offset(query.offset),
       this.db

@@ -8,6 +8,13 @@ export class ApiError extends Error {
   readonly code: string;
   readonly requestId?: string;
   readonly body: unknown;
+  /**
+   * ثوانٍ حتى انتهاء الحدّ — من `X-RateLimit-Reset` أو `Retry-After`.
+   *
+   * بدونها لا تملك الواجهة إلا «حاول لاحقاً»، وهي أسوأ إجابة: من لا يعرف
+   * متى يعاود يعاود فوراً فيُمدِّد الحدّ على نفسه.
+   */
+  readonly retryAfterSec?: number;
 
   constructor(opts: {
     status: number;
@@ -15,6 +22,7 @@ export class ApiError extends Error {
     message?: string;
     requestId?: string;
     body?: unknown;
+    retryAfterSec?: number;
   }) {
     super(opts.message ?? opts.code);
     this.name = 'ApiError';
@@ -22,6 +30,7 @@ export class ApiError extends Error {
     this.code = opts.code;
     this.requestId = opts.requestId;
     this.body = opts.body;
+    this.retryAfterSec = opts.retryAfterSec;
   }
 }
 
@@ -124,10 +133,46 @@ async function parseJsonSafe(res: Response): Promise<unknown> {
   }
 }
 
-function toApiError(status: number, body: unknown, fallbackRequestId?: string): ApiError {
+/**
+ * رموز تعني أن **الرمز نفسه** لم يعد صالحاً — لا أن العملية فشلت.
+ *
+ * كان كل 401 يُمسح عنده المخزن ويُقذف المستخدم إلى الدخول. لكن مسارات
+ * الأمان تردّ 401 لأسباب مجاليّة: رمز استرداد خاطئ، كلمة مرور حالية
+ * خاطئة، رمز مصادقة منتهٍ. فمن أخطأ رمزاً واحداً كان يُطرد من جلسة سليمة
+ * ويُقال له إن جلسته انتهت — وهو خبر كاذب يدفعه إلى الظنّ أن حسابه أصابه
+ * شيء.
+ *
+ * فالمسح يقع على هذه وحدها: ما يخصّ التوكن لا ما يخصّ الطلب.
+ */
+const SESSION_DEAD_CODES = new Set([
+  'NO_TOKEN',
+  'INVALID_TOKEN',
+  'SESSION_REVOKED',
+  'TOKEN_SCOPE_FORBIDDEN',
+]);
+
+function isSessionDead(body: unknown): boolean {
+  const code = (body as ErrorBody | undefined)?.code;
+  // الغياب يُعامَل كموت جلسة: 401 بلا رمز معروف غالباً من الحارس لا المجال
+  return typeof code !== 'string' || SESSION_DEAD_CODES.has(code);
+}
+
+function retryAfterFrom(res?: Response): number | undefined {
+  const raw = res?.headers.get('x-ratelimit-reset') ?? res?.headers.get('retry-after');
+  const n = raw ? Number(raw) : NaN;
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
+}
+
+function toApiError(
+  status: number,
+  body: unknown,
+  fallbackRequestId?: string,
+  res?: Response,
+): ApiError {
   const e = (body ?? {}) as ErrorBody;
   return new ApiError({
     status,
+    retryAfterSec: retryAfterFrom(res),
     code: typeof e.code === 'string' && e.code.length > 0 ? e.code : `HTTP_${status}`,
     message: typeof e.message === 'string' ? e.message : undefined,
     requestId:
@@ -262,21 +307,24 @@ export function createApiClient(opts: CreateApiClientOptions): ApiClient {
         // إعادة المحاولة مرة واحدة فقط بعد تجديد ناجح.
         res = await send(method, path, query, body);
       } else {
-        await storage.clear();
-        onUnauthorized?.();
         const errBody = await parseJsonSafe(res);
-        throw toApiError(res.status, errBody);
+        if (isSessionDead(errBody)) {
+          await storage.clear();
+          onUnauthorized?.();
+        }
+        throw toApiError(res.status, errBody, undefined, res);
       }
     }
 
     const data = await parseJsonSafe(res);
     if (!res.ok) {
-      if (res.status === 401 && !isAuthPath(path)) {
-        // التجديد نجح لكن الطلب المعاد ما زال 401 → جلسة غير صالحة.
+      if (res.status === 401 && !isAuthPath(path) && isSessionDead(data)) {
+        // التجديد نجح لكن الطلب المعاد ما زال 401 بسبب التوكن → جلسة ميتة.
+        // أما 401 مجاليّ (رمز خاطئ مثلاً) فلا يمسّ الجلسة.
         await storage.clear();
         onUnauthorized?.();
       }
-      throw toApiError(res.status, data);
+      throw toApiError(res.status, data, undefined, res);
     }
     return data as T;
   }
