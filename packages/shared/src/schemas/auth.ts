@@ -54,6 +54,8 @@ export const zAdminLogin = z.object({
   email: z.string().email(),
   password: z.string().min(1),
   totp: z.string().regex(/^\d{6}$/).optional(),
+  /** بديل TOTP عند ضياع الجهاز — استعمال واحد */
+  recoveryCode: z.string().min(8).max(64).optional(),
 });
 
 export interface AuthTokens {
@@ -68,3 +70,27 @@ export interface AuthUser {
   role: Role;
   approvalStatus?: string;
 }
+
+/**
+ * تغيير كلمة مرور الإدارة.
+ *
+ * الحالية **إلى جانب** العامل الثاني لا بدلاً منه: من جلس إلى جهاز مفتوح
+ * لا يعرف الحالية، ومن سرق الحالية لا يملك الجهاز. وأيّهما وحده كافٍ
+ * لاختطاف الحساب لو قُبل منفرداً.
+ */
+export const zAdminChangePassword = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: zPassword,
+  /** رمز TOTP أو رمز استرداد — أحدهما مطلوب */
+  totp: z.string().regex(/^\d{6}$/).optional(),
+  recoveryCode: z.string().min(8).max(64).optional(),
+});
+export type AdminChangePasswordInput = z.infer<typeof zAdminChangePassword>;
+
+/** توليد رموز استرداد جديدة — يُبطل ما سبق */
+export const zAdminRecoveryRegenerate = z.object({
+  password: z.string().min(1),
+  totp: z.string().regex(/^\d{6}$/),
+});
+export type AdminRecoveryRegenerateInput = z.infer<typeof zAdminRecoveryRegenerate>;
+

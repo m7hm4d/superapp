@@ -18,6 +18,17 @@ export function adminCredentialsFromEnv(): { email: string; password: string; se
   return { email: ADMIN_EMAIL, password, secret };
 }
 
+/**
+ * رمز TOTP على خطوة لم تُستهلك بعد.
+ *
+ * الرمز لا يُقبل مرتين، وملفات الاختبار تتشارك حساب أدمن واحد — فمن يولّد
+ * رمزاً بلا انتظار قد يصطدم بخطوة استهلكها غيره ويفشل عشوائياً.
+ */
+export async function freshTotp(secret: string): Promise<string> {
+  await waitForNewStep();
+  return totp.generate(secret);
+}
+
 async function waitForNewStep(): Promise<void> {
   while (currentTotpStep() === lastUsedStep) {
     await new Promise((r) => setTimeout(r, 1000));

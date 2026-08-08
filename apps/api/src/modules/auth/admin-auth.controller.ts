@@ -1,5 +1,9 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Post, Req } from '@nestjs/common';
-import { Role, zAdminLogin } from '@superapp/shared';
+import {
+  zAdminChangePassword,
+  zAdminRecoveryRegenerate,
+  type AdminChangePasswordInput,
+  type AdminRecoveryRegenerateInput, Role, zAdminLogin } from '@superapp/shared';
 import { z } from 'zod';
 import { authContextFrom } from '../../common/auth-context';
 import { AuthThrottle } from '../../common/auth-throttle';
@@ -12,6 +16,7 @@ import {
 } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod.pipe';
 import { AdminAuthService, TOTP_ENROLLMENT_SCOPE } from './admin-auth.service';
+import { RecoveryCodesService } from './recovery-codes.service';
 import { PasskeyService } from './passkey.service';
 
 const zTotpToken = z.object({ totp: z.string().regex(/^\d{6}$/) });
@@ -33,6 +38,7 @@ type TotpTokenInput = z.infer<typeof zTotpToken>;
 export class AdminAuthController {
   constructor(
     private readonly adminAuth: AdminAuthService,
+    private readonly recovery: RecoveryCodesService,
     private readonly passkeys: PasskeyService,
   ) {}
 
@@ -141,5 +147,43 @@ export class AdminAuthController {
   @Get('totp/status')
   totpStatus(@CurrentUser() user: RequestUser) {
     return this.adminAuth.totpStatus(user.id);
+  }
+
+  /**
+   * تغيير كلمة المرور: الحالية **مع** عامل ثانٍ.
+   *
+   * محمي بالجلسة كبقية مسارات هذا المتحكّم، فلا يُقبل بتوكن محدود النطاق —
+   * توكن التسجيل أو الخطوة الثانية لا يفتح تغيير كلمة المرور.
+   */
+  @HttpCode(200)
+  @Post('password')
+  changePassword(
+    @CurrentUser() user: RequestUser,
+    @Body(new ZodValidationPipe(zAdminChangePassword)) body: AdminChangePasswordInput,
+    @Req() req: object,
+  ) {
+    return this.adminAuth.changePassword(user.id, body, authContextFrom(req));
+  }
+
+  /** كم رمز استرداد بقي — لتعرف اللوحة متى تنبّه */
+  @Get('recovery-codes')
+  recoveryStatus(@CurrentUser() user: RequestUser) {
+    return this.recovery.remaining(user.id).then((remaining) => ({ remaining }));
+  }
+
+  /**
+   * توليد مجموعة جديدة — تُعرض **مرة واحدة** ولا تُخزَّن نصّاً.
+   *
+   * يشترط كلمة المرور ورمز TOTP: من وصل إلى جهاز مفتوح لا يستطيع أن يطبع
+   * لنفسه مفاتيح دخول دائمة.
+   */
+  @HttpCode(200)
+  @Post('recovery-codes')
+  async regenerateRecovery(
+    @CurrentUser() user: RequestUser,
+    @Body(new ZodValidationPipe(zAdminRecoveryRegenerate)) body: AdminRecoveryRegenerateInput,
+  ) {
+    await this.adminAuth.assertPasswordAndTotp(user.id, body.password, body.totp);
+    return { codes: await this.recovery.regenerate(user.id) };
   }
 }

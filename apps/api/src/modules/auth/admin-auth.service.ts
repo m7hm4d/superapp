@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Inject,
   Injectable,
@@ -13,6 +14,8 @@ import { DB, DbClient } from '../../db/drizzle.module';
 import { adminCredentials, users } from '../../db/schema';
 import { AuthEventsService, type AuthContext } from './auth-events.service';
 import { PasskeyService } from './passkey.service';
+import { ARGON2_OPTIONS } from './auth.service';
+import { RecoveryCodesService } from './recovery-codes.service';
 import { TokenService } from './token.service';
 import { totp, verifyTotpStep } from './totp';
 
@@ -82,6 +85,7 @@ export class AdminAuthService {
     private readonly config: ConfigService,
     private readonly events: AuthEventsService,
     private readonly passkeys: PasskeyService,
+    private readonly recoveryCodes: RecoveryCodesService,
   ) {}
 
   async login(
@@ -89,6 +93,7 @@ export class AdminAuthService {
       email: string;
       password: string;
       totp?: string;
+      recoveryCode?: string;
     },
     ctx: AuthContext = {},
   ): Promise<AdminLoginResult> {
@@ -129,8 +134,18 @@ export class AdminAuthService {
       };
     }
 
-    // رمز TOTP مُرسل مع كلمة المرور: مسار مباشر بلا خطوة وسيطة
-    if (input.totp) {
+    // رمز استرداد بدل TOTP: للجهاز الضائع. يُستهلك مرة واحدة، ويُقبل حتى
+    // لو لم يكن TOTP مفعّلاً — فقد يكون العامل الوحيد الباقي بيد صاحبه.
+    //
+    // ويسقط في مسار النجاح نفسه أدناه لا في نسخة منه: مسارا دخول ينتهيان
+    // إلى ردَّين مبنيَّين على حدة يتباعدان بصمت.
+    if (input.recoveryCode) {
+      const consumed = await this.recoveryCodes.consume(row.user.id, input.recoveryCode);
+      if (!consumed) {
+        await this.events.record({ ...event, userId: row.user.id, outcome: 'totp_invalid' });
+        throw new UnauthorizedException({ code: 'RECOVERY_CODE_INVALID' });
+      }
+    } else if (input.totp) {
       if (!hasTotp) {
         await this.events.record({ ...event, userId: row.user.id, outcome: 'totp_required' });
         throw new UnauthorizedException({ code: 'TOTP_NOT_ENABLED' });
@@ -299,6 +314,94 @@ export class AdminAuthService {
    * يتحقق من الرمز ويستهلكه: التحديث المشروط على last_totp_step هو القفل —
    * محاولتان بالرمز نفسه (إعادة استخدام أو سباق) تنجح إحداهما فقط.
    */
+  /**
+   * تغيير كلمة مرور الإدارة.
+   *
+   * لم يكن للمنتج مسار لهذا: كل تدوير يمرّ بالخادم وSSH وسجلّات الأوامر —
+   * وكلمة مرور تُكتب في سطر أوامر تبقى في تاريخ الصدفة وفي أعين من يقرأ.
+   *
+   * الشرطان معاً لا أحدهما: **الحالية** تمنع من جلس إلى جهاز مفتوح،
+   * و**العامل الثاني** يمنع من سرق الحالية وحدها.
+   *
+   * وتُبطَل الجلسات كلها بعدها — تغيير كلمة المرور يعني عادةً أن صاحبها
+   * يشكّ في تسريبها، فبقاء جلسة قائمة على جهاز آخر يُفرغ الإجراء من معناه.
+   */
+  async changePassword(
+    userId: string,
+    input: { currentPassword: string; newPassword: string; totp?: string; recoveryCode?: string },
+    ctx: AuthContext = {},
+  ): Promise<{ ok: true }> {
+    const event = { ...ctx, method: 'admin_password_totp' as const };
+    const [row] = await this.db
+      .select({ cred: adminCredentials, user: users })
+      .from(adminCredentials)
+      .innerJoin(users, eq(users.id, adminCredentials.userId))
+      .where(eq(adminCredentials.userId, userId))
+      .limit(1);
+    if (!row) throw new UnauthorizedException({ code: 'INVALID_CREDENTIALS' });
+
+    const ok = await argon2.verify(row.user.passwordHash, input.currentPassword);
+    if (!ok) {
+      await this.events.record({ ...event, userId, outcome: 'invalid_credentials' });
+      throw new UnauthorizedException({ code: 'INVALID_CREDENTIALS' });
+    }
+
+    // عامل ثانٍ إلزامي — بلا استثناء لمن لم يفعّل شيئاً: من لا عامل له لا
+    // يصل إلى هنا أصلاً، فالدخول يوقفه عند التسجيل.
+    if (input.recoveryCode) {
+      const consumed = await this.recoveryCodes.consume(userId, input.recoveryCode);
+      if (!consumed) throw new UnauthorizedException({ code: 'RECOVERY_CODE_INVALID' });
+    } else if (input.totp) {
+      if (!row.cred.totpEnabled || !row.cred.totpSecret) {
+        throw new UnauthorizedException({ code: 'TOTP_NOT_ENABLED' });
+      }
+      await this.consumeTotp(userId, row.cred.totpSecret, input.totp, event);
+    } else {
+      throw new UnauthorizedException({ code: 'SECOND_FACTOR_REQUIRED' });
+    }
+
+    // كلمة جديدة مطابقة للقديمة تعني تدويراً لم يقع — ورفضها يمنع الظنّ به
+    if (await argon2.verify(row.user.passwordHash, input.newPassword)) {
+      throw new BadRequestException({ code: 'PASSWORD_UNCHANGED' });
+    }
+
+    await this.db
+      .update(users)
+      .set({ passwordHash: await argon2.hash(input.newPassword, ARGON2_OPTIONS) })
+      .where(eq(users.id, userId));
+
+    await this.tokens.revokeAllForUser(userId, 'password changed');
+    await this.events.record({ ...event, userId, outcome: 'session_revoked' });
+    return { ok: true };
+  }
+
+  /**
+   * يتحقق من كلمة المرور ورمز TOTP معاً — لعملية حسّاسة بلا تغيير حالة.
+   *
+   * يستعمله توليد رموز الاسترداد: من وصل إلى جهاز مفتوح لا يطبع لنفسه
+   * مفاتيح دخول دائمة. ولا يقبل رمز استرداد بديلاً هنا عمداً — رمزٌ واحد
+   * يولّد عشرة يجعل المجموعة أبدية.
+   */
+  async assertPasswordAndTotp(userId: string, password: string, totp: string): Promise<void> {
+    const [row] = await this.db
+      .select({ cred: adminCredentials, user: users })
+      .from(adminCredentials)
+      .innerJoin(users, eq(users.id, adminCredentials.userId))
+      .where(eq(adminCredentials.userId, userId))
+      .limit(1);
+    if (!row) throw new UnauthorizedException({ code: 'INVALID_CREDENTIALS' });
+
+    if (!(await argon2.verify(row.user.passwordHash, password))) {
+      throw new UnauthorizedException({ code: 'INVALID_CREDENTIALS' });
+    }
+    if (!row.cred.totpEnabled || !row.cred.totpSecret) {
+      throw new UnauthorizedException({ code: 'TOTP_NOT_ENABLED' });
+    }
+    await this.consumeTotp(userId, row.cred.totpSecret, totp, {
+      method: 'admin_password_totp' as const,
+    });
+  }
+
   private async consumeTotp(
     userId: string,
     secret: string,
