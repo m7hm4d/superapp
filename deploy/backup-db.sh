@@ -80,7 +80,9 @@ for required_command in df docker id sha256sum stat; do
   command -v "$required_command" >/dev/null 2>&1 || die "$required_command غير مثبَّت"
 done
 [ "$(id -u)" -ne 0 ] || die "لا تشغّل النسخ كمستخدم root"
-[ -f "$ENV_FILE" ] && [ ! -L "$ENV_FILE" ] || die "$ENV_FILE يجب أن يكون ملفاً عادياً لا symlink"
+if [ ! -f "$ENV_FILE" ] || [ -L "$ENV_FILE" ]; then
+  die "$ENV_FILE يجب أن يكون ملفاً عادياً لا symlink"
+fi
 ENV_OWNER="$(stat -c '%u' "$ENV_FILE")" || die "تعذّرت قراءة مالك $ENV_FILE"
 ENV_MODE="$(stat -c '%a' "$ENV_FILE")" || die "تعذّرت قراءة صلاحيات $ENV_FILE"
 [[ "$ENV_OWNER" =~ ^[0-9]+$ && "$ENV_MODE" =~ ^[0-7]{3,4}$ ]] || \

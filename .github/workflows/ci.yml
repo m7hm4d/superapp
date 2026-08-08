@@ -418,11 +418,27 @@ jobs:
 
       - name: Container logs on failure
         if: failure()
-        run: docker compose -f docker-compose.prod.yml --env-file .env.prod logs --tail 60
+        continue-on-error: true
+        run: |
+          if [[ -f .env.prod && ! -L .env.prod ]]; then
+            if ! docker compose -f docker-compose.prod.yml --env-file .env.prod logs --tail 60; then
+              echo "::warning::Unable to collect container logs; preserving the original failure"
+            fi
+          else
+            echo "::notice::.env.prod was not created; skipping container logs"
+          fi
 
       - name: Tear down
         if: always()
-        run: docker compose -f docker-compose.prod.yml --env-file .env.prod down -v
+        continue-on-error: true
+        run: |
+          if [[ -f .env.prod && ! -L .env.prod ]]; then
+            if ! docker compose -f docker-compose.prod.yml --env-file .env.prod down -v; then
+              echo "::warning::Container cleanup failed and requires manual follow-up"
+            fi
+          else
+            echo "::notice::.env.prod was not created; skipping container cleanup"
+          fi
 
       # فحص الثغرات بعد الدخان لا قبله: خطأ في الحزمة نفسها أهم من ثغرة في
       # طبقة أساس، ولا معنى لفحص صورة لا تقلع أصلاً.

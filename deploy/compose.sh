@@ -31,7 +31,9 @@ for required_command in docker id stat; do
   command -v "$required_command" >/dev/null 2>&1 || die "$required_command غير مثبَّت"
 done
 [ "$(id -u)" -ne 0 ] || die "لا تشغّل Compose كمستخدم root"
-[ -f "$ENV_FILE" ] && [ ! -L "$ENV_FILE" ] || die "$ENV_FILE يجب أن يكون ملفاً عادياً لا symlink"
+if [ ! -f "$ENV_FILE" ] || [ -L "$ENV_FILE" ]; then
+  die "$ENV_FILE يجب أن يكون ملفاً عادياً لا symlink"
+fi
 ENV_OWNER="$(stat -c '%u' "$ENV_FILE")" || die "تعذّرت قراءة مالك $ENV_FILE"
 ENV_MODE="$(stat -c '%a' "$ENV_FILE")" || die "تعذّرت قراءة صلاحيات $ENV_FILE"
 [[ "$ENV_OWNER" =~ ^[0-9]+$ && "$ENV_MODE" =~ ^[0-7]{3,4}$ ]] || \
@@ -157,8 +159,9 @@ local_image_revision() {
 API_REVISION="$(local_image_revision "$API_IMAGE")"
 ADMIN_REVISION="$(local_image_revision "$ADMIN_IMAGE")"
 if [ -n "$API_REVISION" ] || [ -n "$ADMIN_REVISION" ]; then
-  [ -n "$API_REVISION" ] && [ -n "$ADMIN_REVISION" ] || \
+  if [ -z "$API_REVISION" ] || [ -z "$ADMIN_REVISION" ]; then
     die "لا يمكن إثبات revision لصورتَي api/admin معاً؛ استعمل deploy/deploy.sh"
+  fi
   [ "$API_REVISION" = "$ADMIN_REVISION" ] || \
     die "صورتا api/admin المحليتان تنتميان إلى commitين مختلفين"
   APP_REVISION="$API_REVISION"
@@ -167,9 +170,10 @@ else
   # digest حقيقي غير موجود محلياً لا نسحبه هنا: deploy.sh وحده يتحقق من
   # التوقيع والـrevision قبل التشغيل.
   zero_digest='sha256:0000000000000000000000000000000000000000000000000000000000000000'
-  [ "$API_IMAGE" = "ghcr.io/${REPO_OWNER}/superapp-api@${zero_digest}" ] && \
-    [ "$ADMIN_IMAGE" = "ghcr.io/${REPO_OWNER}/superapp-admin@${zero_digest}" ] || \
+  if [ "$API_IMAGE" != "ghcr.io/${REPO_OWNER}/superapp-api@${zero_digest}" ] || \
+    [ "$ADMIN_IMAGE" != "ghcr.io/${REPO_OWNER}/superapp-admin@${zero_digest}" ]; then
     die "الصور غير موجودة محلياً؛ استعمل deploy/deploy.sh للسحب والتحقق"
+  fi
   APP_REVISION="$(read_one_value APP_REVISION "$ENV_FILE")"
   [[ "$APP_REVISION" =~ ^[0-9a-f]{40}$ ]] || die "APP_REVISION غير صالح"
 fi

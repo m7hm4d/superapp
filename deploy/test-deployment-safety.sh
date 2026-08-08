@@ -104,14 +104,19 @@ backup_line="$(grep -n 'BACKUP_PATH=.*backup-db\.sh' deploy/deploy.sh | cut -d: 
 migrate_line="$(grep -n -- '--exit-code-from migrate' deploy/deploy.sh | cut -d: -f1)"
 [ -n "$(grep -n 'validate-db-target.py' deploy/deploy.sh | cut -d: -f1)" ] || \
   fail "النشر لا يتحقق من تطابق هدف migration مع backup"
-[ -n "$backup_line" ] && [ -n "$migrate_line" ] || fail "تعذّر إثبات ترتيب backup/migrate"
+if [ -z "$backup_line" ] || [ -z "$migrate_line" ]; then
+  fail "تعذّر إثبات ترتيب backup/migrate"
+fi
 [ "$backup_line" -lt "$migrate_line" ] || fail "الهجرة تسبق النسخة الاحتياطية"
 # نصوص حرفية مقصودة؛ لا نوسع متغيرات سكربت الاختبار.
 # shellcheck disable=SC2016
 snapshot_line="$(grep -n 'snapshot_environment "\$ENV_SOURCE_FILE"' deploy/deploy.sh | cut -d: -f1)"
 db_validation_line="$(grep -n 'validate-db-target.py' deploy/deploy.sh | tail -1 | cut -d: -f1)"
-[ -n "$snapshot_line" ] && [ "$snapshot_line" -lt "$db_validation_line" ] || \
+if [ -n "$snapshot_line" ] && [ "$snapshot_line" -lt "$db_validation_line" ]; then
+  :
+else
   fail "فحص DB لا يستخدم snapshot ثابتة من ملف البيئة"
+fi
 
 grep -Fq "\"\$ADMIN_DIGEST\"" deploy/deploy.sh || fail "سجل النشر لا يحوي admin digest"
 grep -Fq 'handle_post_deploy_failure "فشل فحص صحة db/api/admin"' deploy/deploy.sh || \

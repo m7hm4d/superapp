@@ -127,8 +127,9 @@ if [ -n "$EXPECTED_STACK" ]; then
 fi
 
 if [ -n "$API_URL" ] || [ -n "$ADMIN_URL" ]; then
-  [ -n "$API_URL" ] && [ -n "$ADMIN_URL" ] || \
+  if [ -z "$API_URL" ] || [ -z "$ADMIN_URL" ]; then
     die "يجب تمرير --api-url و--admin-url معاً"
+  fi
   validate_https_origin "--api-url" "$API_URL"
   validate_https_origin "--admin-url" "$ADMIN_URL"
 fi
@@ -174,8 +175,9 @@ for required_command in awk docker cosign flock id install mktemp python3 sha256
   command -v "$required_command" >/dev/null 2>&1 || die "$required_command غير مثبَّت"
 done
 [ "$(id -u)" -ne 0 ] || die "لا تشغّل النشر كمستخدم root"
-[ -f "$ENV_FILE" ] && [ ! -L "$ENV_FILE" ] || \
+if [ ! -f "$ENV_FILE" ] || [ -L "$ENV_FILE" ]; then
   die "$ENV_FILE يجب أن يكون ملفاً عادياً لا symlink"
+fi
 ENV_OWNER="$(stat -c '%u' "$ENV_FILE")" || die "تعذّرت قراءة مالك $ENV_FILE"
 ENV_MODE="$(stat -c '%a' "$ENV_FILE")" || die "تعذّرت قراءة صلاحيات $ENV_FILE"
 [[ "$ENV_OWNER" =~ ^[0-9]+$ && "$ENV_MODE" =~ ^[0-7]{3,4}$ ]] || \
@@ -213,10 +215,14 @@ snapshot_environment() {
   source_hash_after="$(sha256sum "$source" | awk '{print $1}')" || die "تعذّر إعادة حساب hash ملف البيئة"
   after="$(stat -c '%d:%i:%s:%Y:%Z:%u:%a' "$source")" || die "تعذّرت إعادة قراءة metadata ملف البيئة"
 
-  [ -f "$source" ] && [ ! -L "$source" ] || die "تغيّر نوع ملف البيئة أثناء snapshot"
+  if [ ! -f "$source" ] || [ -L "$source" ]; then
+    die "تغيّر نوع ملف البيئة أثناء snapshot"
+  fi
   [ "$before" = "$after" ] || die "تغيّر ملف البيئة أثناء snapshot؛ أعد النشر"
-  [ "$source_hash_before" = "$snapshot_hash" ] && [ "$snapshot_hash" = "$source_hash_after" ] || \
+  if [ "$source_hash_before" != "$snapshot_hash" ] || \
+    [ "$snapshot_hash" != "$source_hash_after" ]; then
     die "تغيّر محتوى ملف البيئة أثناء snapshot؛ أعد النشر"
+  fi
 
   ENV_SNAPSHOT_SHA="$snapshot_hash"
 }
@@ -275,7 +281,9 @@ export STACK_NAME ENV_FILE APP_REVISION
 
 lock_file="${DEPLOY_STATE_DIR}/${STACK_NAME}.deploy.lock"
 if [ -e "$lock_file" ] || [ -L "$lock_file" ]; then
-  [ -f "$lock_file" ] && [ ! -L "$lock_file" ] || die "ملف lock غير آمن"
+  if [ ! -f "$lock_file" ] || [ -L "$lock_file" ]; then
+    die "ملف lock غير آمن"
+  fi
 fi
 exec 9> "$lock_file"
 chmod 600 "$lock_file"
@@ -790,7 +798,9 @@ fi
 # digest الصورتين، سابقتيهما، ومسار النسخة، كي تكون العودة قابلة للتدقيق.
 history_file="${DEPLOY_STATE_DIR}/${STACK_NAME}-history.tsv"
 if [ -e "$history_file" ] || [ -L "$history_file" ]; then
-  [ -f "$history_file" ] && [ ! -L "$history_file" ] || die "ملف سجل النشر غير آمن"
+  if [ ! -f "$history_file" ] || [ -L "$history_file" ]; then
+    die "ملف سجل النشر غير آمن"
+  fi
   HISTORY_OWNER="$(stat -c '%u' "$history_file")" || die "تعذّرت قراءة مالك سجل النشر"
   [ "$HISTORY_OWNER" = "$(id -u)" ] || die "سجل النشر ليس مملوكاً لمستخدم النشر"
 fi

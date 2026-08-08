@@ -111,7 +111,9 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-[ -n "$API" ] && [ -n "$ADMIN" ] || die "عنوانا API وadmin مطلوبان"
+if [ -z "$API" ] || [ -z "$ADMIN" ]; then
+  die "عنوانا API وadmin مطلوبان"
+fi
 validate_https_origin "API URL" "$API"
 validate_https_origin "admin URL" "$ADMIN"
 [[ "$EXPECTED_AUTH_THROTTLE_LIMIT" =~ ^[1-9][0-9]{0,2}$ ]] || \
