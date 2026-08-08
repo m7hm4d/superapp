@@ -38,6 +38,17 @@ type Stage =
   | { name: 'second_factor'; stepUpToken: string; methods: ('totp' | 'passkey')[] };
 
 export default function LoginPage() {
+  /**
+   * يُقرأ **بعد** الترطيب لا أثناء العرض.
+   *
+   * قراءة `window.location` في جسم المكوّن تجعل الخادم يعرض شيئاً والعميل
+   * شيئاً آخر، فيسقط الترطيب برسالة صريحة في المتصفح. وقد وقع ذلك فعلاً.
+   */
+  const [sessionEnded, setSessionEnded] = useState(false);
+  useEffect(() => {
+    setSessionEnded(new URLSearchParams(window.location.search).get('reason') === 'session');
+  }, []);
+
   const router = useRouter();
   const { login, adoptSession } = useAuth();
 
@@ -45,6 +56,8 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [totp, setTotp] = useState('');
+  const [recoveryCode, setRecoveryCode] = useState('');
+  const [useRecovery, setUseRecovery] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [passkeyLoading, setPasskeyLoading] = useState(false);
@@ -95,7 +108,11 @@ export default function LoginPage() {
     setError(null);
     setLoading(true);
     try {
-      const outcome = await login(email.trim(), password, totp);
+      const outcome = await login(
+        email.trim(),
+        password,
+        useRecovery ? { recoveryCode } : { totp },
+      );
       router.replace(outcome.kind === 'enrollment' ? '/enroll' : '/overview');
     } catch (err) {
       if (err instanceof ApiError && err.code === 'STEP_UP_INVALID') {
@@ -146,6 +163,17 @@ export default function LoginPage() {
           </span>
           <h1 className="text-xl font-bold text-zinc-900">لوحة الإدارة</h1>
           <p className="text-sm text-zinc-500">دخول مخصص لفريق التشغيل فقط</p>
+        </div>
+
+        {/* سبب العودة إلى هنا — القذف الصامت يجعل المستخدم يظنّ أن عمليته
+            فشلت، بينما جلسته هي التي انتهت. */}
+        <div>
+          {sessionEnded && (
+            <p className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              انتهت جلستك — غالباً لأن كلمة المرور أو عامل المصادقة تغيّر. سجّل الدخول من
+              جديد.
+            </p>
+          )}
         </div>
 
         {stage.name === 'credentials' ? (
@@ -215,22 +243,50 @@ export default function LoginPage() {
 
             {canUseTotp && (
               <form onSubmit={(e) => void onTotp(e)} className="flex flex-col gap-3">
-                <Input
-                  label="رمز التحقق (TOTP)"
-                  dir="ltr"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  pattern="\d{6}"
-                  maxLength={6}
-                  required
-                  autoFocus={!canUsePasskey}
-                  value={totp}
-                  onChange={(e) => setTotp(e.target.value.replace(/\D/g, ''))}
-                  placeholder="123456"
-                />
+                {useRecovery ? (
+                  <Input
+                    label="رمز استرداد"
+                    dir="ltr"
+                    autoComplete="off"
+                    required
+                    autoFocus
+                    className="font-mono"
+                    value={recoveryCode}
+                    onChange={(e) => setRecoveryCode(e.target.value)}
+                    placeholder="XXXXX-XXXXX-XXXXX-XXXXX"
+                  />
+                ) : (
+                  <Input
+                    label="الرمز من تطبيق المصادقة"
+                    dir="ltr"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    pattern="\d{6}"
+                    maxLength={6}
+                    required
+                    autoFocus={!canUsePasskey}
+                    value={totp}
+                    onChange={(e) => setTotp(e.target.value.replace(/\D/g, ''))}
+                    placeholder="123456"
+                  />
+                )}
                 <Button type="submit" variant="secondary" loading={loading} className="w-full">
-                  تأكيد الرمز
+                  {useRecovery ? 'الدخول برمز الاسترداد' : 'تأكيد الرمز'}
                 </Button>
+
+                {/* المخرج حين يضيع الجهاز — وهو أكثر من يحتاج هذه الشاشة */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUseRecovery((v) => !v);
+                    setError(null);
+                  }}
+                  className="text-xs text-brand-600 underline-offset-2 hover:underline"
+                >
+                  {useRecovery
+                    ? 'العودة إلى رمز التطبيق'
+                    : 'فقدتُ جهازي — الدخول برمز استرداد'}
+                </button>
               </form>
             )}
 

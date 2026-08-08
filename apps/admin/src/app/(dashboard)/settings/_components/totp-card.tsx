@@ -2,11 +2,11 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { ApiError } from '@superapp/api-client';
 import type { AuthTokens, AuthUser } from '@superapp/shared';
 import { api } from '@/lib/api';
+import { authErrorAr } from '@/lib/auth-errors';
 import { useAuth } from '@/lib/auth';
-import { Button } from '@/components/ui';
+import { Button, Input } from '@/components/ui';
 import { TotpEnroll, type TotpSetupResponse } from '@/components/totp-enroll';
 
 interface TotpStatus {
@@ -14,22 +14,16 @@ interface TotpStatus {
   pending: boolean;
 }
 
-const ERROR_AR: Record<string, string> = {
-  TOTP_INVALID: 'الرمز غير صحيح — تأكد من تطبيق المصادقة وحاول مجدداً',
-  TOTP_NOT_SETUP: 'ابدأ بالإعداد أولاً ثم أدخل الرمز',
-  VALIDATION_ERROR: 'أدخل رمزاً من ٦ أرقام',
-};
-
-function arError(e: unknown): string {
-  if (e instanceof ApiError) return ERROR_AR[e.code] ?? `تعذر تنفيذ العملية (${e.code})`;
-  return 'حدث خطأ غير متوقع';
-}
-
 export function TotpCard() {
   const { adoptSession } = useAuth();
   const [setup, setSetup] = useState<TotpSetupResponse | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
   const [justEnabled, setJustEnabled] = useState(false);
+  // إثبات إعادة التحقق — يظهر فقط عند استبدال جهاز قائم
+  const [reauthPassword, setReauthPassword] = useState('');
+  const [reauthTotp, setReauthTotp] = useState('');
+  const [recoveryCode, setRecoveryCode] = useState('');
+  const [useRecovery, setUseRecovery] = useState(false);
 
   const statusQuery = useQuery({
     queryKey: ['totp', 'status'],
@@ -37,13 +31,21 @@ export function TotpCard() {
   });
 
   const setupMutation = useMutation({
-    mutationFn: () => api.post<TotpSetupResponse>('auth/admin/totp/setup'),
+    // استبدال جهاز قائم يشترط إثباتاً حديثاً: بلا هذا كانت جلسة مسروقة
+    // وحدها تكفي لانتزاع العامل الثاني من صاحبه.
+    mutationFn: () =>
+      api.post<TotpSetupResponse>(
+        'auth/admin/totp/setup',
+        enabled
+          ? { password: reauthPassword, ...(useRecovery ? { recoveryCode } : { totp: reauthTotp }) }
+          : undefined,
+      ),
     onSuccess: (data) => {
       setBanner(null);
       setJustEnabled(false);
       setSetup(data);
     },
-    onError: (e) => setBanner(arError(e)),
+    onError: (e) => setBanner(authErrorAr(e)),
   });
 
   const enableMutation = useMutation({
@@ -57,10 +59,62 @@ export function TotpCard() {
       setJustEnabled(true);
       void statusQuery.refetch();
     },
-    onError: (e) => setBanner(arError(e)),
+    onError: (e) => setBanner(authErrorAr(e)),
   });
 
   const enabled = statusQuery.data?.enabled ?? false;
+
+  /** حقول الإثبات: تظهر عند الاستبدال وحده — التسجيل الأول لا عامل قائم له */
+  const reauthFields = enabled && !setup && (
+    <div className="grid max-w-md gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+      <p className="text-zinc-600">
+        لتسجيل جهاز جديد أثبت أنك ما زلت تملك الحالي: أدخل كلمة مرورك والرمز
+        السداسي من تطبيق المصادقة الذي تستعمله الآن. وإن كان الجهاز ضائعاً
+        فاستعمل رمز استرداد.
+      </p>
+      <p className="text-zinc-500">
+        بلا هذا الإثبات تكفي جلسة مسروقة لانتزاع عاملك الثاني. والاستبدال يُبطل
+        جلساتك ورموز استردادك القديمة.
+      </p>
+      <Input
+        label="كلمة المرور"
+        type="password"
+        autoComplete="current-password"
+        value={reauthPassword}
+        onChange={(e) => setReauthPassword(e.target.value)}
+      />
+      {useRecovery ? (
+        <Input
+          label="رمز استرداد"
+          autoComplete="off"
+          placeholder="XXXXX-XXXXX-XXXXX-XXXXX"
+          className="font-mono"
+          value={recoveryCode}
+          onChange={(e) => setRecoveryCode(e.target.value)}
+        />
+      ) : (
+        <Input
+          label="الرمز من تطبيق المصادقة الحالي"
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          maxLength={6}
+          placeholder="******"
+          className="font-mono tracking-widest"
+          value={reauthTotp}
+          onChange={(e) => setReauthTotp(e.target.value.replace(/\D/g, ''))}
+        />
+      )}
+      <button
+        type="button"
+        onClick={() => setUseRecovery((v) => !v)}
+        className="justify-self-start text-sm text-brand-600 underline"
+      >
+        {useRecovery
+          ? 'استعمال رمز تطبيق المصادقة'
+          : 'فقدتُ جهازي — استعمال رمز استرداد'}
+      </button>
+    </div>
+  );
 
   return (
     <div className="space-y-4 text-sm">
@@ -106,9 +160,15 @@ export function TotpCard() {
               غير مفعّلة على هذا الحساب — لن تتمكن من الدخول قبل تسجيل جهاز مصادقة.
             </p>
           )}
+          {reauthFields}
           <Button
             variant={enabled ? 'secondary' : 'primary'}
             loading={setupMutation.isPending}
+            disabled={
+              enabled &&
+              (reauthPassword.length === 0 ||
+                (useRecovery ? recoveryCode.trim().length < 8 : !/^\d{6}$/.test(reauthTotp)))
+            }
             onClick={() => setupMutation.mutate()}
           >
             {enabled ? 'تسجيل جهاز جديد' : 'تفعيل المصادقة الثنائية'}
